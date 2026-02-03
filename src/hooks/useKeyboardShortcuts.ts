@@ -5,6 +5,7 @@ interface ShortcutHandlers {
   onGenerateVariants?: () => void;
   onGenerateSingle?: () => void;
   onDelete?: () => void;
+  onTogglePlayback?: () => void;
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
@@ -32,9 +33,14 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
         e.preventDefault();
         handlers.onDelete();
       }
+
+      if (e.key === ' ' && handlers.onTogglePlayback) {
+        e.preventDefault();
+        handlers.onTogglePlayback();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlers.onDownload, handlers.onGenerateVariants, handlers.onGenerateSingle, handlers.onDelete]);
+  }, [handlers.onDownload, handlers.onGenerateVariants, handlers.onGenerateSingle, handlers.onDelete, handlers.onTogglePlayback]);
 }

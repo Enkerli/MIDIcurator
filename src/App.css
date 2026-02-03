@@ -509,3 +509,69 @@ body {
   margin-left: auto;
   color: var(--mc-text-dim);
 }
+
+/* Piano roll */
+.mc-piano-roll-section {
+  margin-bottom: 20px;
+}
+
+.mc-piano-roll-container {
+  width: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--mc-border);
+}
+
+.mc-piano-roll-canvas {
+  display: block;
+  width: 100%;
+}
+
+/* Transport controls */
+.mc-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mc-transport-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mc-bg-card);
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  color: var(--mc-text);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.1s;
+}
+
+.mc-transport-btn:hover:not(:disabled) {
+  background: var(--mc-border);
+}
+
+.mc-transport-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.mc-transport-btn--active {
+  background: var(--mc-accent);
+  border-color: var(--mc-accent-light);
+}
+
+.mc-transport-time {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--mc-text-muted);
+  min-width: 60px;
+}
+
+.mc-transport-state {
+  font-size: 11px;
+  color: var(--mc-text-dim);
+}
