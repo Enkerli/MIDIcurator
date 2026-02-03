@@ -94,6 +94,8 @@ export function ClipDetail({
         onBpmChange={onBpmChange}
         onBpmSave={onBpmSave}
         onStartEditBpm={onStartEditBpm}
+        playbackTime={playbackTime}
+        isPlaying={playbackState === 'playing'}
       />
 
       <div className="mc-debug-info">

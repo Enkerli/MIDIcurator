@@ -110,6 +110,16 @@ export class MidiDB {
     });
   }
 
+  async clearAllClips(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['clips', 'tags'], 'readwrite');
+      tx.objectStore('clips').clear();
+      tx.objectStore('tags').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async getClipTags(clipId: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['tags'], 'readonly');

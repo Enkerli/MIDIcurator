@@ -35,32 +35,70 @@ output; Safari testing is deferred to the plugin phase.
 
 **Backlog**:
 - Playback transpose (by steps and octaves) for low-register clips
+- Piano roll fold mode (hide unused pitches, show only notes present in clip)
 
 ---
 
 ### Phase A: Harmonic Awareness
-**Estimate**: 2–3 sessions | **Status**: In Progress
+**Estimate**: 2–3 sessions | **Status**: In Progress (core done, UX refinements next)
 
-- Port MIDIsplainer chord dictionary (104 qualities, decimal fingerprint lookup)
-- `detectChord(pitchClasses)` function
-- Enrich `Harmonic` type: `detectedChord`, `root`, `quality`
-- Pattern segmentation: split multi-bar clips at bar boundaries, detect per-bar
-- Display detected chords in piano roll and clip detail
+**Done**:
+- ✅ Port MIDIsplainer chord dictionary (104 qualities, decimal fingerprint lookup)
+- ✅ `detectChord(pitches)` with 12-rotation brute-force + subset matching
+- ✅ Enrich `Harmonic` type: `detectedChord`, `barChords[]`
+- ✅ Per-bar segmentation and detection
+- ✅ Display: ChordBar above piano roll, Chord stat box, sidebar chord labels
+- ✅ 69 new tests (29 dictionary, 38 detection, 2 integration), 111 total
+
+**Remaining (this session)**:
+- "Clear all clips" button for re-import with chord data
+- ChordBar labels left-aligned, anchored to chord onset position
+- Chord stat box becomes dynamic: shows chord at playhead during playback
+- Light mode (CSS custom properties theme toggle)
+
+**Phase A+ (next session)**:
+- Range selection on piano roll → detect chord for selected region
+  (solves: 2-bar chords split in two, multiple chords per bar, cross-barline chords)
+- User-marked non-chord tones (NCTs) excluded from detection
+- Chord sidecar MIDI files (block chords synced to timeline) for export
+- Chord data DB export (filename/ID + chord info, simple format)
 
 **Value**: Foundation for everything harmonic. Unblocks C1, C2, C3, E.
 **Tests**: Chord detection for known triads/sevenths/extensions, edge cases
 (enharmonic, ambiguous voicings).
-**Risk**: Segmentation of mixed MIDI files may need manual override UX.
+**Risk**: Segmentation of mixed MIDI files needs manual override UX (→ range selection).
+
+---
+
+### Phase A-V: Chord Validation
+**Estimate**: 1–2 sessions
+**Depends on**: Phase A complete
+
+- Independent bulk chord validation against third-party source
+  (API service, JS/Python library, or comparison dataset)
+- Quick-label workflow: correct / different notation / third-party likely wrong /
+  first-party likely wrong
+- Report on systematic detection errors → improve algorithm
+- Also: syncopation measurement spot-checking via user subjective testing
+
+**Value**: Confidence in detection accuracy before building on top of it.
+**Risk**: Finding a reliable third-party source; syncopation has no ground truth.
 
 ---
 
 ### Phase C1: Single-Chord Realization
-**Estimate**: 2 sessions
+**Estimate**: 2–3 sessions
 
+- Simple version first: "transpose + quantize to chord" using detected chord info
 - `realizeOnChord(gesture, harmonic, targetChord)` function
 - Voice-leading: minimize pitch movement, preserve contour
 - UI: chord selector per clip
-- Export re-voiced MIDI
+- Export re-voiced MIDI + chord sidecar
+
+Later enhancements (C1+):
+- Chord-degree-aware realization (distinguish chord tones from NCTs)
+- User NCT annotations feed into smarter realization
+- Full voicing notation (register, spread, voice-leading quality metrics)
 
 **Value**: First real musical transformation beyond density.
 **Tests**: Voice-leading distance metrics, round-trip (realize then detect).
@@ -74,6 +112,7 @@ output; Safari testing is deferred to the plugin phase.
 - Bar-by-bar chord progression editor UI
 - Apply progression to pattern (re-realize per bar)
 - Passing tones / approach notes within chord context
+- Progression naming and relationships between progressions
 
 **Value**: Patterns become musically adaptive.
 **Tests**: Progression parsing, per-bar realization, passing tone generation.
@@ -106,6 +145,22 @@ output; Safari testing is deferred to the plugin phase.
 
 ---
 
+### Phase G: Curation + Taxonomy
+**Estimate**: 3–4 sessions
+
+- Folksonomy tagging with autocomplete (block chords, arp, bassline, drums…)
+- "Vibe" tags (mood, ambiance, genre, suggested instruments)
+- Bulk operations: filter DB → select → apply tags/categories
+- Deduplication detection (identical PCS patterns, near-duplicates)
+- Pattern compression: block chord → harmonic rhythm, arp → shape + harmony
+  (analysis/resynthesis: store abstract representation, recreate full clip)
+- BPM as approximate range; double/half-speed transforms with simplification
+
+**Value**: The "curator" in MIDI Curator — organizing a growing library.
+**Tests**: Tag CRUD, deduplication metrics, compression round-trip.
+
+---
+
 ### Phase E: Feedback + Live Learning
 **Estimate**: 5–6 sessions
 
@@ -130,9 +185,19 @@ output; Safari testing is deferred to the plugin phase.
 
 **Value**: DAW-integrated workflow — the end goal.
 **Tests**: JUCE unit tests, plugin validation (auval, pluginval), DAW testing.
-**Depends on**: All algorithm phases (A through E) being stable in the webapp.
+**Depends on**: All algorithm phases (A through G) being stable in the webapp.
 
 ---
+
+## Edge Cases & Testing Concerns
+
+- **Black MIDI / extremely dense patterns**: Chord detection may produce noise;
+  need graceful degradation or "too dense to analyze" indicator.
+- **Sparse clips**: Few notes may not form recognizable chords; single-note or
+  two-note clips should degrade to interval display rather than chord guess.
+- **BPM sensitivity**: Clips at extreme tempi; double/half-speed ambiguity.
+- **Syncopation measurement**: No objective ground truth; validate through
+  user subjective experience and comparative ranking.
 
 ## External Resources
 
@@ -142,15 +207,28 @@ output; Safari testing is deferred to the plugin phase.
 | Jazz Standards Corpus | BunksLua/roman_numeral_titles.lua (local) | Phase C2, C3 |
 | Transition Table | BunksLua/transitionTable.lua (local) | Phase C3 |
 | Rhythm Pattern Explorer | github.com/Enkerli/rhythm_pattern_explorer | Phase D |
+| Chord validation API/lib | TBD (research in Phase A-V) | Phase A-V |
 
 ## Versioning
 
-- `0.1.x` — Current (scaffolding + density transforms)
+- `0.1.x` — Scaffolding + density transforms
 - `0.2.x` — Phase B (piano roll + playback)
 - `0.3.x` — Phase A (harmonic awareness)
 - `0.4.x` — Phase C1 (chord realization)
 - `0.5.x` — Phase C2 (progressions)
 - `0.6.x` — Phase D (Serpe)
 - `0.7.x` — Phase C3 (Markov)
-- `0.8.x` — Phase E (learning)
+- `0.8.x` — Phase G (curation + taxonomy)
+- `0.9.x` — Phase E (learning)
 - `1.0.0` — Phase F (plugin)
+
+## Design Ideas Backlog
+
+These are captured for future consideration. Not yet scheduled.
+
+- Full voicing notation (register, spread, intervals, voice-leading metrics)
+- "Slash chord" awareness in detection and display
+- Arp shape library (blooming, cascade, etc.) for pattern compression
+- "Quantize + humanize" as dual transforms (abstract pattern + microtiming)
+- Suggested instruments per tag/vibe for playback timbres
+- Chord progression database (name progressions, find relatives, ii-V-I detection)

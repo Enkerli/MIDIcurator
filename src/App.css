@@ -1,3 +1,4 @@
+/* Dark theme (default) */
 :root {
   --mc-bg: #1a1a1a;
   --mc-bg-raised: #202020;
@@ -16,6 +17,39 @@
   --mc-green-muted: #6a9a6a;
   --mc-green-bg: #2a3a2a;
   --mc-green-text: #9aba9a;
+  --mc-piano-bg: #181818;
+  --mc-piano-lane-dark: #1e1e1e;
+  --mc-piano-lane-light: #222;
+  --mc-piano-grid-bar: #444;
+  --mc-piano-grid-beat: #2a2a2a;
+  --mc-piano-label: #666;
+}
+
+/* Light theme */
+:root[data-theme="light"] {
+  --mc-bg: #f0f0f0;
+  --mc-bg-raised: #e8e8e8;
+  --mc-bg-card: #ffffff;
+  --mc-border: #ccc;
+  --mc-text: #222;
+  --mc-text-muted: #666;
+  --mc-text-dim: #999;
+  --mc-text-label: #555;
+  --mc-accent: #2a6090;
+  --mc-accent-light: #1a5080;
+  --mc-selected: #d0e0f0;
+  --mc-selected-border: #2a6090;
+  --mc-success: #2a8a5a;
+  --mc-danger: #c04040;
+  --mc-green-muted: #4a8a4a;
+  --mc-green-bg: #e0f0e0;
+  --mc-green-text: #2a5a2a;
+  --mc-piano-bg: #f8f8f8;
+  --mc-piano-lane-dark: #eee;
+  --mc-piano-lane-light: #f4f4f4;
+  --mc-piano-grid-bar: #aaa;
+  --mc-piano-grid-beat: #ddd;
+  --mc-piano-label: #888;
 }
 
 * {
@@ -52,9 +86,35 @@ body {
   overflow-y: auto;
 }
 
+.mc-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 .mc-sidebar h2 {
   font-size: 18px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
+}
+
+.mc-theme-toggle {
+  width: 32px;
+  height: 32px;
+  background: var(--mc-bg-card);
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  color: var(--mc-text);
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.mc-theme-toggle:hover {
+  background: var(--mc-border);
 }
 
 /* Drop zone */
@@ -99,6 +159,21 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.mc-clip-count-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mc-btn--clear-all {
+  padding: 4px 10px;
+  background: var(--mc-danger);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 11px;
 }
 
 /* Clip list */
@@ -605,8 +680,8 @@ body {
 
 .mc-chord-bar-cell {
   flex: 1;
-  padding: 4px 2px;
-  text-align: center;
+  padding: 4px 6px;
+  text-align: left;
   background: var(--mc-bg-card);
   border-right: 1px solid var(--mc-border);
   min-width: 0;

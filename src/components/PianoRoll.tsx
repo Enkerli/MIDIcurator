@@ -21,6 +21,31 @@ interface PianoRollProps {
   height?: number;
 }
 
+/**
+ * Read CSS custom properties from the document root for canvas rendering.
+ * Falls back to dark-theme defaults if properties are not set.
+ */
+function getThemeColors(): {
+  bg: string;
+  laneDark: string;
+  laneLight: string;
+  gridBar: string;
+  gridBeat: string;
+  label: string;
+  noteBorder: string;
+} {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    bg: style.getPropertyValue('--mc-piano-bg').trim() || '#181818',
+    laneDark: style.getPropertyValue('--mc-piano-lane-dark').trim() || '#1e1e1e',
+    laneLight: style.getPropertyValue('--mc-piano-lane-light').trim() || '#222',
+    gridBar: style.getPropertyValue('--mc-piano-grid-bar').trim() || '#444',
+    gridBeat: style.getPropertyValue('--mc-piano-grid-beat').trim() || '#2a2a2a',
+    label: style.getPropertyValue('--mc-piano-label').trim() || '#666',
+    noteBorder: style.getPropertyValue('--mc-text').trim()?.replace(')', ', 0.1)').replace('rgb(', 'rgba(') || 'rgba(255,255,255,0.1)',
+  };
+}
+
 export function PianoRoll({
   clip,
   playbackTime,
@@ -43,25 +68,26 @@ export function PianoRoll({
       if (!ctx) return;
       ctx.scale(dpr, dpr);
 
+      const theme = getThemeColors();
       const layout = computeLayout(clip.gesture, clip.harmonic, width, height);
       layoutRef.current = layout;
 
       // Background
-      ctx.fillStyle = '#181818';
+      ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, width, height);
 
       // Piano key lanes (horizontal stripes for each pitch)
       for (let pitch = layout.minPitch; pitch <= layout.maxPitch; pitch++) {
         const y =
           layout.topPad + (layout.maxPitch - pitch) * layout.pxPerSemitone;
-        ctx.fillStyle = isBlackKey(pitch) ? '#1e1e1e' : '#222';
+        ctx.fillStyle = isBlackKey(pitch) ? theme.laneDark : theme.laneLight;
         ctx.fillRect(layout.labelWidth, y, width - layout.labelWidth, layout.pxPerSemitone);
       }
 
       // Grid lines (beats and bars)
       const gridLines = computeGridLines(clip.gesture, layout);
       for (const line of gridLines) {
-        ctx.strokeStyle = line.isBar ? '#444' : '#2a2a2a';
+        ctx.strokeStyle = line.isBar ? theme.gridBar : theme.gridBeat;
         ctx.lineWidth = line.isBar ? 1 : 0.5;
         ctx.beginPath();
         ctx.moveTo(line.x, 0);
@@ -70,7 +96,7 @@ export function PianoRoll({
       }
 
       // Pitch labels (left gutter, only C notes and edges)
-      ctx.fillStyle = '#666';
+      ctx.fillStyle = theme.label;
       ctx.font = '9px system-ui';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
@@ -91,7 +117,7 @@ export function PianoRoll({
         ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
         // Subtle border for definition
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.strokeStyle = 'rgba(128,128,128,0.2)';
         ctx.lineWidth = 0.5;
         ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
       }

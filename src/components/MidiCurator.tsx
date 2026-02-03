@@ -169,6 +169,17 @@ export function MidiCurator() {
     refreshClips();
   }, [db, refreshClips]);
 
+  const clearAllClips = useCallback(async () => {
+    if (!db) return;
+    if (confirm('Clear all clips? This will remove everything from the database.')) {
+      stop();
+      setSelectedClip(null);
+      setTags([]);
+      await db.clearAllClips();
+      refreshClips();
+    }
+  }, [db, refreshClips, stop]);
+
   const handleDownloadCurrent = useCallback(() => {
     if (selectedClip) downloadMIDI(selectedClip);
   }, [selectedClip]);
@@ -214,6 +225,7 @@ export function MidiCurator() {
           onFilterChange={setFilterTag}
           onSelectClip={selectClip}
           onDownloadAll={() => downloadAllClips(filteredClips)}
+          onClearAll={clearAllClips}
           onFilesDropped={handleFileUpload}
           fileInputRef={fileInputRef}
         />

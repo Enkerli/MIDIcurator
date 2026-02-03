@@ -1,4 +1,5 @@
-import type { Clip } from '../types/clip';
+import { useMemo } from 'react';
+import type { Clip, DetectedChord } from '../types/clip';
 
 interface StatsGridProps {
   clip: Clip;
@@ -7,6 +8,32 @@ interface StatsGridProps {
   onBpmChange: (value: string) => void;
   onBpmSave: () => void;
   onStartEditBpm: () => void;
+  /** Current playback time in seconds (for dynamic chord display) */
+  playbackTime: number;
+  /** Whether playback is active */
+  isPlaying: boolean;
+}
+
+/**
+ * Get the chord at the current playhead position.
+ * Falls back to overall detected chord when stopped.
+ */
+function getChordAtTime(clip: Clip, time: number, isPlaying: boolean): DetectedChord | null | undefined {
+  if (!isPlaying || time <= 0 || !clip.harmonic.barChords || clip.harmonic.barChords.length === 0) {
+    return clip.harmonic.detectedChord;
+  }
+
+  // Convert time (seconds) to ticks
+  const ticksPerSecond = (clip.bpm / 60) * clip.gesture.ticks_per_beat;
+  const currentTick = time * ticksPerSecond;
+  const currentBar = Math.floor(currentTick / clip.gesture.ticks_per_bar);
+
+  // Find the bar chord
+  if (currentBar >= 0 && currentBar < clip.harmonic.barChords.length) {
+    return clip.harmonic.barChords[currentBar].chord;
+  }
+
+  return clip.harmonic.detectedChord;
 }
 
 export function StatsGrid({
@@ -16,7 +43,16 @@ export function StatsGrid({
   onBpmChange,
   onBpmSave,
   onStartEditBpm,
+  playbackTime,
+  isPlaying,
 }: StatsGridProps) {
+  const currentChord = useMemo(
+    () => getChordAtTime(clip, playbackTime, isPlaying),
+    [clip, playbackTime, isPlaying],
+  );
+
+  const chordLabel = isPlaying && playbackTime > 0 ? 'Chord (at playhead)' : 'Chord';
+
   return (
     <div className="mc-stats-grid">
       <div className="mc-stat-box">
@@ -43,15 +79,13 @@ export function StatsGrid({
         )}
       </div>
       <div className="mc-stat-box">
-        <div className="mc-stat-label">Chord</div>
+        <div className="mc-stat-label">{chordLabel}</div>
         <div className="mc-stat-value mc-stat-value--chord">
-          {clip.harmonic.detectedChord
-            ? clip.harmonic.detectedChord.symbol
-            : '—'}
+          {currentChord ? currentChord.symbol : '—'}
         </div>
-        {clip.harmonic.detectedChord && (
+        {currentChord && (
           <div className="mc-stat-sub">
-            {clip.harmonic.detectedChord.qualityName}
+            {currentChord.qualityName}
           </div>
         )}
       </div>

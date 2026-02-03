@@ -9,3 +9,7 @@ BunksLua/
 
 # Original artifact archive (provenance kept via docs)
 ClaudeChat2Code.zip
+
+# Sample MIDI files (user test data, not source)
+ChordSequences/
+*.mid

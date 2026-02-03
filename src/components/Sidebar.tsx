@@ -2,6 +2,7 @@ import type { RefObject } from 'react';
 import type { Clip } from '../types/clip';
 import { DropZone } from './DropZone';
 import { ClipCard } from './ClipCard';
+import { ThemeToggle } from './ThemeToggle';
 
 interface SidebarProps {
   clips: Clip[];
@@ -10,6 +11,7 @@ interface SidebarProps {
   onFilterChange: (value: string) => void;
   onSelectClip: (clip: Clip) => void;
   onDownloadAll: () => void;
+  onClearAll: () => void;
   onFilesDropped: (files: File[]) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
 }
@@ -21,12 +23,16 @@ export function Sidebar({
   onFilterChange,
   onSelectClip,
   onDownloadAll,
+  onClearAll,
   onFilesDropped,
   fileInputRef,
 }: SidebarProps) {
   return (
     <div className="mc-sidebar">
-      <h2>MIDI Curator</h2>
+      <div className="mc-sidebar-header">
+        <h2>MIDI Curator</h2>
+        <ThemeToggle />
+      </div>
 
       <DropZone onFilesDropped={onFilesDropped} fileInputRef={fileInputRef} />
 
@@ -40,11 +46,18 @@ export function Sidebar({
 
       <div className="mc-clip-count">
         <span>{clips.length} clips</span>
-        {clips.length > 0 && (
-          <button className="mc-btn--download-all" onClick={onDownloadAll}>
-            Download All
-          </button>
-        )}
+        <span className="mc-clip-count-actions">
+          {clips.length > 0 && (
+            <>
+              <button className="mc-btn--download-all" onClick={onDownloadAll}>
+                Download All
+              </button>
+              <button className="mc-btn--clear-all" onClick={onClearAll}>
+                Clear All
+              </button>
+            </>
+          )}
+        </span>
       </div>
 
       <div className="mc-clip-list">
