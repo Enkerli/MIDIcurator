@@ -43,6 +43,19 @@ export function StatsGrid({
         )}
       </div>
       <div className="mc-stat-box">
+        <div className="mc-stat-label">Chord</div>
+        <div className="mc-stat-value mc-stat-value--chord">
+          {clip.harmonic.detectedChord
+            ? clip.harmonic.detectedChord.symbol
+            : '—'}
+        </div>
+        {clip.harmonic.detectedChord && (
+          <div className="mc-stat-sub">
+            {clip.harmonic.detectedChord.qualityName}
+          </div>
+        )}
+      </div>
+      <div className="mc-stat-box">
         <div className="mc-stat-label">Notes</div>
         <div className="mc-stat-value">{clip.gesture.onsets.length}</div>
       </div>

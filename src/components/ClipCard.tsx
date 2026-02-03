@@ -25,6 +25,11 @@ export function ClipCard({ clip, isSelected, onClick }: ClipCardProps) {
             ({densityMatch[1]}x)
           </span>
         )}
+        {clip.harmonic.detectedChord && (
+          <span className="mc-clip-card-chord">
+            &bull; {clip.harmonic.detectedChord.symbol}
+          </span>
+        )}
       </div>
     </div>
   );

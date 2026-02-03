@@ -144,6 +144,12 @@ body {
   margin-left: 6px;
 }
 
+.mc-clip-card-chord {
+  color: var(--mc-accent-light);
+  margin-left: 6px;
+  font-weight: 500;
+}
+
 /* Main content */
 .mc-main {
   flex: 1;
@@ -159,7 +165,7 @@ body {
 /* Stats grid */
 .mc-stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(5, 1fr);
   gap: 20px;
   margin-bottom: 30px;
 }
@@ -574,4 +580,57 @@ body {
 .mc-transport-state {
   font-size: 11px;
   color: var(--mc-text-dim);
+}
+
+/* Chord stat value */
+.mc-stat-value--chord {
+  font-size: 18px;
+  color: var(--mc-accent-light);
+}
+
+.mc-stat-sub {
+  font-size: 11px;
+  color: var(--mc-text-dim);
+  margin-top: 4px;
+}
+
+/* Chord bar (per-bar progression strip) */
+.mc-chord-bar {
+  display: flex;
+  margin-bottom: 4px;
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mc-chord-bar-cell {
+  flex: 1;
+  padding: 4px 2px;
+  text-align: center;
+  background: var(--mc-bg-card);
+  border-right: 1px solid var(--mc-border);
+  min-width: 0;
+}
+
+.mc-chord-bar-cell:last-child {
+  border-right: none;
+}
+
+.mc-chord-bar-cell--empty {
+  opacity: 0.4;
+}
+
+.mc-chord-bar-symbol {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mc-accent-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.mc-chord-bar-cell--empty .mc-chord-bar-symbol {
+  color: var(--mc-text-dim);
+  font-weight: 400;
 }

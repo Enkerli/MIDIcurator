@@ -2,6 +2,7 @@ import type { Clip } from '../types/clip';
 import type { PlaybackState } from '../lib/playback';
 import { StatsGrid } from './StatsGrid';
 import { PianoRoll } from './PianoRoll';
+import { ChordBar } from './ChordBar';
 import { TransportBar } from './TransportBar';
 import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
@@ -75,6 +76,9 @@ export function ClipDetail({
           onPause={onPause}
           onStop={onStop}
         />
+        {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
+          <ChordBar barChords={clip.harmonic.barChords} />
+        )}
         <PianoRoll
           clip={clip}
           playbackTime={playbackTime}

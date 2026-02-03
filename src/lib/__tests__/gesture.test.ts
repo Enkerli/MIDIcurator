@@ -64,4 +64,41 @@ describe('extractHarmonic', () => {
     expect(harmonic.pitches).toEqual([60, 64, 67]);
     expect(harmonic.pitchClasses).toEqual([0, 4, 7]); // C major triad
   });
+
+  it('detects overall chord when called without gesture', () => {
+    const notes: Note[] = [
+      { midi: 60, ticks: 0, durationTicks: 100, velocity: 80 },
+      { midi: 64, ticks: 100, durationTicks: 100, velocity: 80 },
+      { midi: 67, ticks: 200, durationTicks: 100, velocity: 80 },
+    ];
+    const harmonic = extractHarmonic(notes);
+    expect(harmonic.detectedChord).toBeDefined();
+    expect(harmonic.detectedChord!.root).toBe(0);
+    expect(harmonic.detectedChord!.symbol).toBe('C');
+    expect(harmonic.detectedChord!.qualityKey).toBe('maj');
+  });
+
+  it('detects per-bar chords when called with gesture', () => {
+    // Bar 0: C major, Bar 1: D minor
+    const notes: Note[] = [
+      { midi: 60, ticks: 0, durationTicks: 100, velocity: 80 },
+      { midi: 64, ticks: 120, durationTicks: 100, velocity: 80 },
+      { midi: 67, ticks: 240, durationTicks: 100, velocity: 80 },
+      { midi: 62, ticks: 480, durationTicks: 100, velocity: 80 },
+      { midi: 65, ticks: 600, durationTicks: 100, velocity: 80 },
+      { midi: 69, ticks: 720, durationTicks: 100, velocity: 80 },
+    ];
+    const gesture = extractGesture(notes, 120); // 120 tpb, 480 tpbar
+    const harmonic = extractHarmonic(notes, gesture);
+    expect(harmonic.barChords).toBeDefined();
+    expect(harmonic.barChords!.length).toBe(gesture.num_bars);
+    // Bar 0 should be C major
+    expect(harmonic.barChords![0].chord).not.toBeNull();
+    expect(harmonic.barChords![0].chord!.qualityKey).toBe('maj');
+    expect(harmonic.barChords![0].chord!.root).toBe(0); // C
+    // Bar 1 should be D minor
+    expect(harmonic.barChords![1].chord).not.toBeNull();
+    expect(harmonic.barChords![1].chord!.qualityKey).toBe('min');
+    expect(harmonic.barChords![1].chord!.root).toBe(2); // D
+  });
 });
