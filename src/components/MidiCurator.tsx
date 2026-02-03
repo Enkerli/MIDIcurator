@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import type { Clip } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { usePlayback } from '../hooks/usePlayback';
 import { parseMIDI, extractNotes, extractBPM } from '../lib/midi-parser';
 import { extractGesture, extractHarmonic } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
@@ -12,6 +13,7 @@ import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
 
 export function MidiCurator() {
   const { db, clips, refreshClips } = useDatabase();
+  const { playbackState, currentTime, play, pause, stop, toggle } = usePlayback();
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState('');
@@ -22,6 +24,8 @@ export function MidiCurator() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
+    // Stop playback when switching clips
+    stop();
     setSelectedClip(clip);
     setBpmValue(clip.bpm.toString());
     setEditingBpm(false);
@@ -29,7 +33,7 @@ export function MidiCurator() {
       const clipTags = await db.getClipTags(clip.id);
       setTags(clipTags);
     }
-  }, [db]);
+  }, [db, stop]);
 
   const saveBpm = useCallback(async () => {
     if (!selectedClip || !db) return;
@@ -53,12 +57,13 @@ export function MidiCurator() {
   const deleteClip = useCallback(async () => {
     if (!selectedClip || !db) return;
     if (confirm(`Delete "${selectedClip.filename}"?`)) {
+      stop();
       await db.deleteClip(selectedClip.id);
       setSelectedClip(null);
       setTags([]);
       refreshClips();
     }
-  }, [selectedClip, db, refreshClips]);
+  }, [selectedClip, db, refreshClips, stop]);
 
   const generateVariants = useCallback(async () => {
     if (!selectedClip || !db) return;
@@ -132,7 +137,6 @@ export function MidiCurator() {
 
         if (notes.length === 0) continue;
 
-        // Try filename BPM first, fall back to tempo events
         let bpm: number | null = null;
         const bpmMatch = file.name.match(/(\d+)[-_\s]?bpm/i);
         if (bpmMatch) {
@@ -179,6 +183,10 @@ export function MidiCurator() {
     }
   }, [selectedClip, clips]);
 
+  const handleTogglePlayback = useCallback(() => {
+    if (selectedClip) toggle(selectedClip);
+  }, [selectedClip, toggle]);
+
   // Keyboard shortcuts (only active when a clip is selected)
   useKeyboardShortcuts(
     selectedClip
@@ -187,6 +195,7 @@ export function MidiCurator() {
           onGenerateVariants: generateVariants,
           onGenerateSingle: generateSingleVariant,
           onDelete: deleteClip,
+          onTogglePlayback: handleTogglePlayback,
         }
       : {},
   );
@@ -229,6 +238,11 @@ export function MidiCurator() {
             onDownload={handleDownloadCurrent}
             onDelete={deleteClip}
             onDownloadVariantsZip={handleDownloadVariantsZip}
+            playbackState={playbackState}
+            playbackTime={currentTime}
+            onPlay={() => play(selectedClip)}
+            onPause={pause}
+            onStop={stop}
           />
         ) : (
           <div className="mc-main">

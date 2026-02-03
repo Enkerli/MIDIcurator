@@ -1,5 +1,8 @@
 import type { Clip } from '../types/clip';
+import type { PlaybackState } from '../lib/playback';
 import { StatsGrid } from './StatsGrid';
+import { PianoRoll } from './PianoRoll';
+import { TransportBar } from './TransportBar';
 import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
 import { ActionBar } from './ActionBar';
@@ -24,6 +27,11 @@ interface ClipDetailProps {
   onDownload: () => void;
   onDelete: () => void;
   onDownloadVariantsZip: () => void;
+  playbackState: PlaybackState;
+  playbackTime: number;
+  onPlay: () => void;
+  onPause: () => void;
+  onStop: () => void;
 }
 
 export function ClipDetail({
@@ -45,6 +53,11 @@ export function ClipDetail({
   onDownload,
   onDelete,
   onDownloadVariantsZip,
+  playbackState,
+  playbackTime,
+  onPlay,
+  onPause,
+  onStop,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -53,6 +66,22 @@ export function ClipDetail({
   return (
     <div className="mc-main">
       <h1>{clip.filename}</h1>
+
+      <div className="mc-piano-roll-section">
+        <TransportBar
+          state={playbackState}
+          currentTime={playbackTime}
+          onPlay={onPlay}
+          onPause={onPause}
+          onStop={onStop}
+        />
+        <PianoRoll
+          clip={clip}
+          playbackTime={playbackTime}
+          isPlaying={playbackState === 'playing'}
+          height={240}
+        />
+      </div>
 
       <StatsGrid
         clip={clip}
