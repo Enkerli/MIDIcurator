@@ -22,21 +22,24 @@ output; Safari testing is deferred to the plugin phase.
 ## Phases
 
 ### Phase B: Piano Roll + Playback
-**Estimate**: 1–2 sessions | **Status**: Next up
+**Estimate**: 1–2 sessions | **Status**: ✅ Complete (v0.2.0)
 
-- Canvas piano roll (grid + note rectangles + velocity coloring)
-- WebAudio playback (schedule notes, simple oscillator)
-- Transport controls (play/pause/stop, Space key)
-- Playhead synced to playback
-- A/B comparison view (original vs variant)
+- ✅ Canvas piano roll (grid + note rectangles + velocity coloring)
+- ✅ WebAudio playback (schedule notes, triangle oscillators)
+- ✅ Transport controls (play/pause/stop, Space key)
+- ✅ Playhead synced to playback
+- A/B comparison view (original vs variant) — deferred
 
 **Value**: Unlocks visual + auditory evaluation of every subsequent feature.
-**Tests**: Rendering helpers (tick-to-pixel, pitch-to-y), playback scheduling.
+**Tests**: 18 piano-roll tests (rendering helpers, tick-to-pixel, pitch-to-y, velocity coloring).
+
+**Backlog**:
+- Playback transpose (by steps and octaves) for low-register clips
 
 ---
 
 ### Phase A: Harmonic Awareness
-**Estimate**: 2–3 sessions
+**Estimate**: 2–3 sessions | **Status**: In Progress
 
 - Port MIDIsplainer chord dictionary (104 qualities, decimal fingerprint lookup)
 - `detectChord(pitchClasses)` function

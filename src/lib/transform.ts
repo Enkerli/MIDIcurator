@@ -1,6 +1,7 @@
-import type { Gesture, Harmonic } from '../types/clip';
+import type { Gesture, Harmonic, DetectedChord, BarChordInfo } from '../types/clip';
 import type { TransformParams, TransformResult } from '../types/transform';
 import { computeSyncopation } from './gesture';
+import { detectOverallChord, detectChordsPerBar, type ChordMatch } from './chord-detect';
 
 export function transformGesture(
   gesture: Gesture,
@@ -102,10 +103,39 @@ export function transformGesture(
     ticks_per_beat: gesture.ticks_per_beat,
   };
 
+  // Chord detection on the transformed result
+  const overallMatch = detectOverallChord(pitches);
+  const detectedChord = matchToDetectedChord(overallMatch);
+
+  const barMatches = detectChordsPerBar(
+    pitches,
+    onsets,
+    newGesture.ticks_per_bar,
+    newGesture.num_bars,
+  );
+  const barChords: BarChordInfo[] = barMatches.map(bm => ({
+    bar: bm.bar,
+    chord: matchToDetectedChord(bm.chord),
+    pitchClasses: bm.pitchClasses,
+  }));
+
   const newHarmonic: Harmonic = {
     pitches,
     pitchClasses: pitches.map(p => p % 12),
+    detectedChord,
+    barChords,
   };
 
   return { gesture: newGesture, harmonic: newHarmonic };
+}
+
+function matchToDetectedChord(match: ChordMatch | null): DetectedChord | null {
+  if (!match) return null;
+  return {
+    root: match.root,
+    rootName: match.rootName,
+    qualityKey: match.quality.key,
+    symbol: match.symbol,
+    qualityName: match.quality.fullName,
+  };
 }

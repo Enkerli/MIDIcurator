@@ -147,7 +147,7 @@ export function MidiCurator() {
         }
 
         const gesture = extractGesture(notes, midiData.ticksPerBeat);
-        const harmonic = extractHarmonic(notes);
+        const harmonic = extractHarmonic(notes, gesture);
 
         const clip: Clip = {
           id: crypto.randomUUID(),

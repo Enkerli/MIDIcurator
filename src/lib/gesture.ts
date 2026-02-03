@@ -1,4 +1,5 @@
-import type { Note, Gesture, Harmonic } from '../types/clip';
+import type { Note, Gesture, Harmonic, DetectedChord, BarChordInfo } from '../types/clip';
+import { detectOverallChord, detectChordsPerBar, type ChordMatch } from './chord-detect';
 
 export function computeSyncopation(
   onsets: number[],
@@ -56,9 +57,49 @@ export function extractGesture(notes: Note[], ticksPerBeat: number): Gesture {
   };
 }
 
-export function extractHarmonic(notes: Note[]): Harmonic {
+/**
+ * Convert a ChordMatch from the detection engine into a serializable DetectedChord.
+ */
+function toDetectedChord(match: ChordMatch | null): DetectedChord | null {
+  if (!match) return null;
+  return {
+    root: match.root,
+    rootName: match.rootName,
+    qualityKey: match.quality.key,
+    symbol: match.symbol,
+    qualityName: match.quality.fullName,
+  };
+}
+
+/**
+ * Extract the harmonic layer from a set of notes, including chord detection.
+ *
+ * @param notes       The note array
+ * @param gesture     Optional gesture (needed for bar-level segmentation)
+ */
+export function extractHarmonic(notes: Note[], gesture?: Gesture): Harmonic {
   const pitches = notes.map(n => n.midi);
   const pitchClasses = pitches.map(p => p % 12);
 
-  return { pitches, pitchClasses };
+  // Overall chord detection
+  const overallMatch = detectOverallChord(pitches);
+  const detectedChord = toDetectedChord(overallMatch);
+
+  // Per-bar chord detection (if gesture info available)
+  let barChords: BarChordInfo[] | undefined;
+  if (gesture && gesture.num_bars > 0) {
+    const barMatches = detectChordsPerBar(
+      pitches,
+      gesture.onsets,
+      gesture.ticks_per_bar,
+      gesture.num_bars,
+    );
+    barChords = barMatches.map(bm => ({
+      bar: bm.bar,
+      chord: toDetectedChord(bm.chord),
+      pitchClasses: bm.pitchClasses,
+    }));
+  }
+
+  return { pitches, pitchClasses, detectedChord, barChords };
 }
