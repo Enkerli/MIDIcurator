@@ -1,0 +1,11 @@
+node_modules
+dist
+.DS_Store
+*.local
+tsconfig.tsbuildinfo
+
+# External data corpora (imported as needed)
+BunksLua/
+
+# Original artifact archive (provenance kept via docs)
+ClaudeChat2Code.zip
