@@ -79,21 +79,10 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
       runningStatus = status;
     }
 
-    const type = status & 0xF0;
     const channel = status & 0x0F;
 
-    if (type === 0x90) {
-      // Note On
-      const note = data[offset++]!;
-      const velocity = data[offset++]!;
-      events.push({ delta, type: 'noteOn', note, velocity, channel });
-    } else if (type === 0x80) {
-      // Note Off
-      const note = data[offset++]!;
-      const velocity = data[offset++]!;
-      events.push({ delta, type: 'noteOff', note, velocity, channel });
-    } else if (type === 0xFF) {
-      // Meta event
+    if (status === 0xFF) {
+      // Meta event — check full status byte before masking
       const metaType = data[offset++]!;
       let length = 0;
       do {
@@ -109,12 +98,46 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
         const microsecondsPerBeat = (metaData[0]! << 16) | (metaData[1]! << 8) | metaData[2]!;
         const bpm = Math.round(60000000 / microsecondsPerBeat);
         events.push({ delta, type: 'tempo', bpm });
+      } else if (metaType === 0x2F) {
+        // End of Track
+        break;
       }
+      // All other meta events silently consumed (time sig, key sig, text, etc.)
+    } else if (status === 0xF0 || status === 0xF7) {
+      // SysEx events — variable-length data
+      let length = 0;
+      do {
+        byte = data[offset++]!;
+        length = (length << 7) | (byte & 0x7F);
+      } while (byte & 0x80);
+      offset += length;
+    } else if (status >= 0xF0) {
+      // Other system common/realtime messages
+      if (status === 0xF2) {
+        offset += 2; // Song Position Pointer
+      } else if (status === 0xF1 || status === 0xF3) {
+        offset += 1; // MTC Quarter Frame, Song Select
+      }
+      // 0xF4-0xF6, 0xF8-0xFE: 0 data bytes
     } else {
-      // Skip other events
-      if (type === 0xC0 || type === 0xD0) {
+      // Channel voice messages
+      const type = status & 0xF0;
+
+      if (type === 0x90) {
+        // Note On
+        const note = data[offset++]!;
+        const velocity = data[offset++]!;
+        events.push({ delta, type: 'noteOn', note, velocity, channel });
+      } else if (type === 0x80) {
+        // Note Off
+        const note = data[offset++]!;
+        const velocity = data[offset++]!;
+        events.push({ delta, type: 'noteOff', note, velocity, channel });
+      } else if (type === 0xC0 || type === 0xD0) {
+        // Program Change, Channel Pressure: 1 data byte
         offset += 1;
       } else if (type === 0xB0 || type === 0xE0 || type === 0xA0) {
+        // Control Change, Pitch Bend, Aftertouch: 2 data bytes
         offset += 2;
       }
     }

@@ -93,6 +93,7 @@ export function extractHarmonic(notes: Note[], gesture?: Gesture): Harmonic {
       gesture.onsets,
       gesture.ticks_per_bar,
       gesture.num_bars,
+      gesture.durations,
     );
     barChords = barMatches.map(bm => ({
       bar: bm.bar,

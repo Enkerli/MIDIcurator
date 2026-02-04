@@ -101,4 +101,28 @@ describe('extractHarmonic', () => {
     expect(harmonic.barChords![1].chord!.qualityKey).toBe('min');
     expect(harmonic.barChords![1].chord!.root).toBe(2); // D
   });
+
+  it('detects chords in bars with only sustained notes', () => {
+    // Chord starts in bar 0, sustains through bar 1 (no new onsets in bar 1)
+    const notes: Note[] = [
+      { midi: 60, ticks: 0, durationTicks: 960, velocity: 80 },   // C sustained 2 bars
+      { midi: 64, ticks: 0, durationTicks: 960, velocity: 80 },   // E sustained 2 bars
+      { midi: 67, ticks: 0, durationTicks: 960, velocity: 80 },   // G sustained 2 bars
+    ];
+    const gesture = extractGesture(notes, 120); // 120 tpb, 480 tpbar
+    const harmonic = extractHarmonic(notes, gesture);
+
+    expect(harmonic.barChords).toBeDefined();
+    expect(harmonic.barChords!.length).toBe(2);
+
+    // Bar 0: C major (onset)
+    expect(harmonic.barChords![0].chord).not.toBeNull();
+    expect(harmonic.barChords![0].chord!.root).toBe(0);
+    expect(harmonic.barChords![0].chord!.qualityKey).toBe('maj');
+
+    // Bar 1: C major (sustained — should still detect)
+    expect(harmonic.barChords![1].chord).not.toBeNull();
+    expect(harmonic.barChords![1].chord!.root).toBe(0);
+    expect(harmonic.barChords![1].chord!.qualityKey).toBe('maj');
+  });
 });

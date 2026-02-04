@@ -112,6 +112,7 @@ export function transformGesture(
     onsets,
     newGesture.ticks_per_bar,
     newGesture.num_bars,
+    durations,
   );
   const barChords: BarChordInfo[] = barMatches.map(bm => ({
     bar: bm.bar,

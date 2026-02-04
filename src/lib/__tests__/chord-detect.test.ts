@@ -278,6 +278,81 @@ describe('detectChordsPerBar', () => {
     const bars = detectChordsPerBar([], [], 480, 4);
     expect(bars).toHaveLength(4);
   });
+
+  it('includes sustained notes from previous bar when durations provided', () => {
+    // 3 notes start at tick 0 with long durations that span into bar 1
+    // No new notes start in bar 1
+    // Without durations: bar 1 is empty
+    // With durations: bar 1 should still detect the sustained chord
+    const pitches =  [60, 64, 67]; // C major
+    const onsets =   [0,  0,  0];
+    const durations = [960, 960, 960]; // 2 bars long
+    const ticksPerBar = 480;
+
+    // Without durations
+    const barsNoDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2);
+    expect(barsNoDur[0].chord).not.toBeNull();
+    expect(barsNoDur[1].chord).toBeNull(); // no notes onset in bar 1
+
+    // With durations
+    const barsWithDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
+    expect(barsWithDur[0].chord).not.toBeNull();
+    expect(barsWithDur[1].chord).not.toBeNull(); // sustained into bar 1
+    expect(barsWithDur[1].chord!.root).toBe(0); // C
+    expect(barsWithDur[1].chord!.quality.key).toBe('maj');
+  });
+
+  it('sustained notes combine with new onsets for richer detection', () => {
+    // Bar 0: C and E start with long sustain
+    // Bar 1: G starts, and C+E are still sounding → full C major
+    const pitches =  [60, 64, 67];
+    const onsets =   [0,  0,  480];
+    const durations = [960, 960, 240];
+    const ticksPerBar = 480;
+
+    // Without durations: bar 1 has only G (1 note) → no chord
+    const barsNoDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2);
+    expect(barsNoDur[1].chord).toBeNull(); // just one note onset
+
+    // With durations: bar 1 has G onset + C,E sustained → C major
+    const barsWithDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
+    expect(barsWithDur[1].chord).not.toBeNull();
+    expect(barsWithDur[1].chord!.root).toBe(0); // C
+    expect(barsWithDur[1].chord!.quality.key).toBe('maj');
+  });
+
+  it('notes that ended before bar start are not included', () => {
+    // Note ends exactly at bar boundary — should NOT be included in next bar
+    const pitches =  [60, 64, 67];
+    const onsets =   [0,  0,  0];
+    const durations = [480, 480, 480]; // end exactly at bar 1 start
+    const ticksPerBar = 480;
+
+    const bars = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
+    expect(bars[0].chord).not.toBeNull(); // notes in bar 0
+    expect(bars[1].chord).toBeNull(); // notes ended at boundary, not sounding
+  });
+
+  it('alternating chord pattern with sustained notes', () => {
+    // Simulates the Ghosthack issue: chords sustain across 2 bars each
+    // Bar 0-1: Eb sus4 (Eb, Ab, Bb)
+    // Bar 2-3: B maj9 (B, D#, F#, A#, C#)
+    const pitches =  [63, 68, 70, 59, 63, 66, 70, 61];
+    const onsets =   [0,  0,  0,  960, 960, 960, 960, 960];
+    const durations = [960, 960, 960, 960, 960, 960, 960, 960]; // each chord spans 2 bars
+    const ticksPerBar = 480;
+
+    const bars = detectChordsPerBar(pitches, onsets, ticksPerBar, 4, durations);
+
+    // Bar 0: chord onset
+    expect(bars[0].chord).not.toBeNull();
+    // Bar 1: sustained from bar 0 — should also have a chord
+    expect(bars[1].chord).not.toBeNull();
+    // Bar 2: new chord onset
+    expect(bars[2].chord).not.toBeNull();
+    // Bar 3: sustained from bar 2
+    expect(bars[3].chord).not.toBeNull();
+  });
 });
 
 // ─── detectOverallChord ────────────────────────────────────────────────

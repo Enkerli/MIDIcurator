@@ -177,17 +177,21 @@ export interface BarChord {
 
 /**
  * Segment notes by bar and detect a chord for each bar.
+ * Includes notes that are still sounding (sustained) from previous bars.
  *
- * @param pitches    Array of MIDI pitches (parallel with onsets)
- * @param onsets     Array of onset times in ticks
+ * @param pitches     Array of MIDI pitches (parallel with onsets/durations)
+ * @param onsets      Array of onset times in ticks
  * @param ticksPerBar Ticks per bar
- * @param numBars    Total number of bars
+ * @param numBars     Total number of bars
+ * @param durations   Optional array of note durations in ticks.
+ *                    When provided, notes sustaining into a bar are included.
  */
 export function detectChordsPerBar(
   pitches: number[],
   onsets: number[],
   ticksPerBar: number,
   numBars: number,
+  durations?: number[],
 ): BarChord[] {
   const bars: BarChord[] = [];
 
@@ -197,8 +201,16 @@ export function detectChordsPerBar(
 
     const barPitches: number[] = [];
     for (let i = 0; i < onsets.length; i++) {
-      if (onsets[i] >= barStart && onsets[i] < barEnd) {
-        barPitches.push(pitches[i]);
+      const onset = onsets[i]!;
+      const dur = durations ? durations[i]! : 0;
+      const noteEnd = onset + dur;
+
+      // Include if:
+      // 1. Note starts in this bar, OR
+      // 2. Note started before but is still sounding in this bar
+      if ((onset >= barStart && onset < barEnd) ||
+          (durations && onset < barStart && noteEnd > barStart)) {
+        barPitches.push(pitches[i]!);
       }
     }
 
