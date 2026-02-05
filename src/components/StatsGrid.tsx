@@ -15,12 +15,19 @@ interface StatsGridProps {
 }
 
 /**
- * Get the chord at the current playhead position.
+ * Get the chord and pitch classes at the current playhead position.
  * Falls back to overall detected chord when stopped.
  */
-function getChordAtTime(clip: Clip, time: number, isPlaying: boolean): DetectedChord | null | undefined {
+function getChordInfoAtTime(
+  clip: Clip,
+  time: number,
+  isPlaying: boolean,
+): { chord: DetectedChord | null | undefined; pitchClasses: number[] } {
   if (!isPlaying || time <= 0 || !clip.harmonic.barChords || clip.harmonic.barChords.length === 0) {
-    return clip.harmonic.detectedChord;
+    return {
+      chord: clip.harmonic.detectedChord,
+      pitchClasses: clip.harmonic.pitchClasses || [],
+    };
   }
 
   // Convert time (seconds) to ticks
@@ -30,10 +37,17 @@ function getChordAtTime(clip: Clip, time: number, isPlaying: boolean): DetectedC
 
   // Find the bar chord
   if (currentBar >= 0 && currentBar < clip.harmonic.barChords.length) {
-    return clip.harmonic.barChords[currentBar].chord;
+    const barInfo = clip.harmonic.barChords[currentBar];
+    return {
+      chord: barInfo.chord,
+      pitchClasses: barInfo.pitchClasses || [],
+    };
   }
 
-  return clip.harmonic.detectedChord;
+  return {
+    chord: clip.harmonic.detectedChord,
+    pitchClasses: clip.harmonic.pitchClasses || [],
+  };
 }
 
 export function StatsGrid({
@@ -46,12 +60,23 @@ export function StatsGrid({
   playbackTime,
   isPlaying,
 }: StatsGridProps) {
-  const currentChord = useMemo(
-    () => getChordAtTime(clip, playbackTime, isPlaying),
+  const chordInfo = useMemo(
+    () => getChordInfoAtTime(clip, playbackTime, isPlaying),
     [clip, playbackTime, isPlaying],
   );
 
   const chordLabel = isPlaying && playbackTime > 0 ? 'Chord (at playhead)' : 'Chord';
+
+  // Format pitch class set for display
+  const pcsStr = chordInfo.pitchClasses.length > 0
+    ? `[${[...new Set(chordInfo.pitchClasses)].sort((a, b) => a - b).join(',')}]`
+    : '';
+
+  const chordDisplayText = chordInfo.chord
+    ? chordInfo.chord.symbol
+    : chordInfo.pitchClasses.length > 0
+      ? `?? ${pcsStr}`
+      : '—';
 
   return (
     <div className="mc-stats-grid">
@@ -81,13 +106,17 @@ export function StatsGrid({
       <div className="mc-stat-box">
         <div className="mc-stat-label">{chordLabel}</div>
         <div className="mc-stat-value mc-stat-value--chord">
-          {currentChord ? currentChord.symbol : '—'}
+          {chordDisplayText}
         </div>
-        {currentChord && (
+        {chordInfo.chord ? (
           <div className="mc-stat-sub">
-            {currentChord.qualityName}
+            {chordInfo.chord.qualityName}
           </div>
-        )}
+        ) : chordInfo.pitchClasses.length > 0 ? (
+          <div className="mc-stat-sub">
+            unrecognized structure
+          </div>
+        ) : null}
       </div>
       <div className="mc-stat-box">
         <div className="mc-stat-label">Notes</div>
