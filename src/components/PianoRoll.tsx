@@ -8,8 +8,12 @@ import {
   velocityColor,
   isBlackKey,
   noteName,
+  xToTick,
+  collectNoteBoundaries,
+  snapToNearestBoundary,
+  isMinimumDrag,
 } from '../lib/piano-roll';
-import type { PianoRollLayout } from '../lib/piano-roll';
+import type { PianoRollLayout, TickRange } from '../lib/piano-roll';
 
 interface PianoRollProps {
   clip: Clip;
@@ -19,6 +23,10 @@ interface PianoRollProps {
   isPlaying: boolean;
   /** Canvas height in CSS pixels */
   height?: number;
+  /** Snapped tick range to highlight (null = no selection) */
+  selectionRange: TickRange | null;
+  /** Called when user completes a drag selection or clicks to clear */
+  onRangeSelect: (range: TickRange | null) => void;
 }
 
 /**
@@ -51,10 +59,17 @@ export function PianoRoll({
   playbackTime,
   isPlaying,
   height = 240,
+  selectionRange,
+  onRangeSelect,
 }: PianoRollProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<PianoRollLayout | null>(null);
+
+  // Transient drag state (refs, not reactive — we redraw manually during drag)
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragCurrentX = useRef(0);
 
   const draw = useCallback(
     (canvas: HTMLCanvasElement, width: number) => {
@@ -122,6 +137,22 @@ export function PianoRoll({
         ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
       }
 
+      // Selection overlay (finalized selection from prop)
+      if (selectionRange) {
+        const x1 = layout.labelWidth + selectionRange.startTick * layout.pxPerTick;
+        const x2 = layout.labelWidth + selectionRange.endTick * layout.pxPerTick;
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fillRect(x1, 0, x2 - x1, height);
+
+        // Edge lines
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x1, 0); ctx.lineTo(x1, height);
+        ctx.moveTo(x2, 0); ctx.lineTo(x2, height);
+        ctx.stroke();
+      }
+
       // Playhead
       if (isPlaying && playbackTime > 0) {
         const px = timeToX(
@@ -140,8 +171,91 @@ export function PianoRoll({
         }
       }
     },
-    [clip, playbackTime, isPlaying, height],
+    [clip, playbackTime, isPlaying, height, selectionRange],
   );
+
+  // ─── Mouse handlers for drag selection ─────────────────────────────
+
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const layout = layoutRef.current;
+    if (!canvas || !layout) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+
+    // Ignore clicks in the label gutter
+    if (x < layout.labelWidth) return;
+
+    isDragging.current = true;
+    dragStartX.current = x;
+    dragCurrentX.current = x;
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDragging.current) return;
+    const canvas = canvasRef.current;
+    const layout = layoutRef.current;
+    if (!canvas || !layout) return;
+
+    const rect = canvas.getBoundingClientRect();
+    dragCurrentX.current = e.clientX - rect.left;
+
+    // Live preview: redraw base then overlay the drag region
+    const container = containerRef.current;
+    if (container) {
+      draw(canvas, container.clientWidth);
+
+      // Draw temporary drag overlay on top
+      // Context is already in CSS-pixel space after draw() applies ctx.scale(dpr, dpr)
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const x1 = Math.min(dragStartX.current, dragCurrentX.current);
+        const x2 = Math.max(dragStartX.current, dragCurrentX.current);
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fillRect(x1, 0, x2 - x1, height);
+      }
+    }
+  }, [draw, height]);
+
+  const handleMouseUp = useCallback(() => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+
+    const layout = layoutRef.current;
+    if (!layout) return;
+
+    const rawStart = xToTick(dragStartX.current, layout);
+    const rawEnd = xToTick(dragCurrentX.current, layout);
+
+    // Minimum drag check — tiny drags treated as click → clear selection
+    if (!isMinimumDrag(rawStart, rawEnd, clip.gesture.ticks_per_beat)) {
+      onRangeSelect(null);
+      return;
+    }
+
+    // Collect note boundaries for snap-to-note functionality
+    const boundaries = collectNoteBoundaries(clip.gesture.onsets, clip.gesture.durations);
+
+    const startTick = snapToNearestBoundary(
+      Math.min(rawStart, rawEnd),
+      boundaries,
+      clip.gesture.ticks_per_beat,
+    );
+    const endTick = snapToNearestBoundary(
+      Math.max(rawStart, rawEnd),
+      boundaries,
+      clip.gesture.ticks_per_beat,
+    );
+
+    // Edge case: snapping collapsed the range to zero
+    if (startTick === endTick) {
+      onRangeSelect(null);
+      return;
+    }
+
+    onRangeSelect({ startTick, endTick });
+  }, [clip.gesture.onsets, clip.gesture.durations, clip.gesture.ticks_per_beat, onRangeSelect]);
 
   // Observe container width for responsive sizing
   useEffect(() => {
@@ -167,7 +281,14 @@ export function PianoRoll({
 
   return (
     <div ref={containerRef} className="mc-piano-roll-container">
-      <canvas ref={canvasRef} className="mc-piano-roll-canvas" />
+      <canvas
+        ref={canvasRef}
+        className="mc-piano-roll-canvas"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      />
     </div>
   );
 }

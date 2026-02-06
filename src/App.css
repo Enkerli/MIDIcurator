@@ -482,8 +482,17 @@ body {
 }
 
 .mc-btn--small {
-  padding: 8px 16px;
-  font-size: 13px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--mc-accent);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+}
+
+.mc-btn--small:hover {
+  background: var(--mc-accent-light);
 }
 
 .mc-btn--download-all {
@@ -606,6 +615,7 @@ body {
 .mc-piano-roll-canvas {
   display: block;
   width: 100%;
+  cursor: crosshair;
 }
 
 /* Transport controls */
@@ -669,22 +679,99 @@ body {
   margin-top: 4px;
 }
 
+.mc-stat-notes {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--mc-text-muted);
+  letter-spacing: 1px;
+}
+
+.mc-btn--tag-chord {
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: var(--mc-accent);
+  border: none;
+  border-radius: 3px;
+  color: white;
+  cursor: pointer;
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.mc-btn--tag-chord:hover {
+  opacity: 0.85;
+}
+
+/* Chord adaptation input */
+.mc-chord-adapt {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.mc-chord-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 3px;
+  background: var(--mc-bg);
+  color: var(--mc-text);
+  min-width: 80px;
+}
+
+.mc-chord-input:focus {
+  outline: none;
+  border-color: var(--mc-accent);
+}
+
+.mc-chord-input--valid {
+  border-color: var(--mc-success);
+}
+
+.mc-chord-input--invalid {
+  border-color: var(--mc-danger);
+}
+
+.mc-btn--adapt-chord {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: var(--mc-success);
+  border: none;
+  border-radius: 3px;
+  color: white;
+  cursor: pointer;
+}
+
+.mc-btn--adapt-chord:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.mc-btn--adapt-chord:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Chord bar (per-bar progression strip) */
 .mc-chord-bar {
   display: flex;
   margin-bottom: 4px;
+  margin-left: 40px; /* Align with piano roll (matches labelWidth) */
   border: 1px solid var(--mc-border);
   border-radius: 4px;
   overflow: hidden;
 }
 
 .mc-chord-bar-cell {
-  flex: 1;
+  /* Width set dynamically via inline style to match piano roll bar sizing */
+  flex: none;
   padding: 4px 6px;
   text-align: left;
   background: var(--mc-bg-card);
   border-right: 1px solid var(--mc-border);
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .mc-chord-bar-cell:last-child {
@@ -708,4 +795,81 @@ body {
 .mc-chord-bar-cell--empty .mc-chord-bar-symbol {
   color: var(--mc-text-dim);
   font-weight: 400;
+}
+
+/* Segmented chord bar cells (multiple chords per bar) */
+.mc-chord-bar-cell--segmented {
+  position: relative;
+  padding: 0;
+}
+
+.mc-chord-bar-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px;
+  text-align: center;
+  background: var(--mc-bg-card);
+  border-right: 1px dashed var(--mc-border);
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.mc-chord-bar-segment:last-child {
+  border-right: none;
+}
+
+.mc-chord-bar-segment--empty {
+  opacity: 0.4;
+}
+
+.mc-chord-bar-segment:hover {
+  background-color: var(--mc-hover);
+}
+
+.mc-chord-bar-segment--selected {
+  background-color: var(--mc-selection);
+  box-shadow: inset 0 0 0 2px var(--mc-accent);
+}
+
+.mc-chord-bar-segment .mc-chord-bar-symbol {
+  font-size: 11px;
+}
+
+/* Selected state for single-chord cells */
+.mc-chord-bar-cell:hover:not(.mc-chord-bar-cell--segmented) {
+  background-color: var(--mc-hover);
+}
+
+.mc-chord-bar-cell--selected {
+  background-color: var(--mc-selection);
+  box-shadow: inset 0 0 0 2px var(--mc-accent);
+}
+
+/* Inline editing styles for chord bar */
+.mc-chord-bar-segment--editing,
+.mc-chord-bar-cell--editing {
+  padding: 0;
+}
+
+.mc-chord-edit-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--mc-bg-card);
+  color: var(--mc-accent-light);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  outline: 2px solid var(--mc-accent);
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.mc-chord-bar-cell--editing .mc-chord-edit-input {
+  font-size: 12px;
 }

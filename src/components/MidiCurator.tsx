@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
-import type { Clip } from '../types/clip';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import type { Clip, DetectedChord } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
@@ -7,6 +7,11 @@ import { parseMIDI, extractNotes, extractBPM } from '../lib/midi-parser';
 import { extractGesture, extractHarmonic } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
+import { getNotesInTickRange, detectChordBlocks } from '../lib/piano-roll';
+import type { TickRange } from '../lib/piano-roll';
+import { detectChord } from '../lib/chord-detect';
+import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
+import { substituteSegmentPitches } from '../lib/chord-substitute';
 import { Sidebar } from './Sidebar';
 import { ClipDetail } from './ClipDetail';
 import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
@@ -21,12 +26,14 @@ export function MidiCurator() {
   const [editingBpm, setEditingBpm] = useState(false);
   const [bpmValue, setBpmValue] = useState('');
   const [densityMultiplier, setDensityMultiplier] = useState(1.0);
+  const [selectionRange, setSelectionRange] = useState<TickRange | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
     // Stop playback when switching clips
     stop();
     setSelectedClip(clip);
+    setSelectionRange(null);
     setBpmValue(clip.bpm.toString());
     setEditingBpm(false);
     if (db) {
@@ -194,6 +201,262 @@ export function MidiCurator() {
     }
   }, [selectedClip, clips]);
 
+  // ─── Range selection chord detection ──────────────────────────────
+
+  const rangeChordInfo = useMemo(() => {
+    if (!selectionRange || !selectedClip) return null;
+
+    const indices = getNotesInTickRange(
+      selectedClip.gesture.onsets,
+      selectedClip.gesture.durations,
+      selectionRange.startTick,
+      selectionRange.endTick,
+    );
+
+    if (indices.length === 0) return null;
+
+    // Detect chord blocks (notes that start and end together)
+    const blocks = detectChordBlocks(
+      indices,
+      selectedClip.gesture.onsets,
+      selectedClip.gesture.durations,
+    );
+
+    // Get pitch classes for each block and detect chords
+    const ticksPerBeat = selectedClip.gesture.ticks_per_beat || 480;
+    const ticksPerBar = selectedClip.gesture.ticks_per_bar;
+
+    const blockInfo = blocks.map(b => {
+      const pitches = b.noteIndices.map(i => selectedClip.harmonic.pitches[i]!);
+      const pcs = [...new Set(pitches.map(p => ((p % 12) + 12) % 12))].sort((a, b) => a - b);
+      const chord = detectChord(pitches);
+
+      // Calculate beat position within bar for scoring
+      const barStart = Math.floor(b.startTick / ticksPerBar) * ticksPerBar;
+      const localTick = b.startTick - barStart;
+      const beat = Math.floor(localTick / ticksPerBeat);
+
+      // Score: prefer more notes, strong beats (1 and 4), simple triads
+      const noteCountScore = b.noteIndices.length * 10;
+      const beatBonus = (beat === 0 || beat === 3) ? 5 : 0;
+      const simpleTriadBonus = chord && ['maj', 'min', '5'].includes(chord.quality.key) ? 3 : 0;
+      const score = noteCountScore + beatBonus + simpleTriadBonus;
+
+      return { pitches, pcs, pcsKey: pcs.join(','), chord, score };
+    });
+
+    // Check if all blocks have the same pitch class set
+    const uniquePcsSets = [...new Set(blockInfo.map(b => b.pcsKey))];
+
+    let pitchesToDetect: number[];
+    if (uniquePcsSets.length === 1) {
+      // All blocks are the same chord - use first block's pitches
+      pitchesToDetect = blockInfo[0]?.pitches ?? [];
+    } else {
+      // Multiple different chords - use the block with highest score
+      const best = blockInfo.reduce((a, b) => b.score > a.score ? b : a);
+      pitchesToDetect = best.pitches;
+    }
+
+    const match = detectChord(pitchesToDetect);
+    const pitchClasses = [...new Set(pitchesToDetect.map(p => ((p % 12) + 12) % 12))];
+
+    const chord: DetectedChord | null = match
+      ? {
+          root: match.root,
+          rootName: match.rootName,
+          qualityKey: match.quality.key,
+          symbol: match.symbol,
+          qualityName: match.quality.fullName,
+        }
+      : null;
+
+    return { chord, pitchClasses, noteCount: indices.length };
+  }, [selectionRange, selectedClip]);
+
+  const handleOverrideBarChords = useCallback(async () => {
+    if (!selectedClip || !db || !selectionRange || !rangeChordInfo?.chord) return;
+
+    const { ticks_per_bar } = selectedClip.gesture;
+    const startBar = Math.floor(selectionRange.startTick / ticks_per_bar);
+    const endBar = Math.floor((selectionRange.endTick - 1) / ticks_per_bar);
+
+    const existingBarChords = selectedClip.harmonic.barChords ?? [];
+    const updatedBarChords = existingBarChords.map((bc) => {
+      // Skip bars outside the selection range
+      if (bc.bar < startBar || bc.bar > endBar) return bc;
+
+      // Calculate bar-relative tick positions
+      const barStartTick = bc.bar * ticks_per_bar;
+      const localStart = Math.max(0, selectionRange.startTick - barStartTick);
+      const localEnd = Math.min(ticks_per_bar, selectionRange.endTick - barStartTick);
+
+      // Whole bar override? Set chord directly, clear segments
+      if (localStart === 0 && localEnd === ticks_per_bar) {
+        return { ...bc, chord: rangeChordInfo.chord, segments: undefined };
+      }
+
+      // Sub-bar override: splice into segments
+      const splicedSegments = spliceSegment(
+        bc.segments,
+        bc.chord,
+        ticks_per_bar,
+        localStart,
+        localEnd,
+        rangeChordInfo.chord,
+      );
+
+      // Remove segments that cover rests (no notes) - rests carry no chord info
+      const newSegments = removeRestSegments(
+        splicedSegments,
+        barStartTick,
+        selectedClip.gesture.onsets,
+        selectedClip.gesture.durations,
+      );
+
+      // If result is trivial (single full-bar segment), simplify to chord field
+      if (isTrivialSegments(newSegments, ticks_per_bar)) {
+        return { ...bc, chord: newSegments[0]?.chord ?? null, segments: undefined };
+      }
+
+      // If no segments left (all were rests), keep the bar's detected chord
+      if (newSegments.length === 0) {
+        return bc;
+      }
+
+      return { ...bc, segments: newSegments };
+    });
+
+    const updated: Clip = {
+      ...selectedClip,
+      harmonic: { ...selectedClip.harmonic, barChords: updatedBarChords },
+    };
+
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    refreshClips();
+  }, [selectedClip, db, selectionRange, rangeChordInfo, refreshClips]);
+
+  // ─── Chord substitution (adapt notes to new chord) ─────────────────
+  const handleAdaptChord = useCallback(async (newChord: DetectedChord) => {
+    if (!selectedClip || !db || !selectionRange) return;
+
+    // 1. Substitute pitches in the selected range
+    const newPitches = substituteSegmentPitches(
+      selectedClip.harmonic.pitches,
+      selectedClip.gesture.onsets,
+      selectionRange.startTick,
+      selectionRange.endTick,
+      newChord,
+    );
+
+    // 2. Re-extract harmonic info with the new pitches
+    const updatedHarmonic = extractHarmonic(
+      selectedClip.gesture.onsets.map((onset, i) => ({
+        midi: newPitches[i]!,
+        velocity: selectedClip.gesture.velocities[i]!,
+        ticks: onset,
+        durationTicks: selectedClip.gesture.durations[i]!,
+      })),
+      selectedClip.gesture,
+    );
+
+    // 3. Merge old segments with new harmonic data, then update the adapted segment
+    const { ticks_per_bar } = selectedClip.gesture;
+    const startBar = Math.floor(selectionRange.startTick / ticks_per_bar);
+    const endBar = Math.floor((selectionRange.endTick - 1) / ticks_per_bar);
+
+    // IMPORTANT: extractHarmonic creates fresh barChords with NO segments.
+    // We need to preserve existing user-defined segments from the old clip.
+    const existingBarChords = selectedClip.harmonic.barChords ?? [];
+
+    const updatedBarChords = updatedHarmonic.barChords?.map((newBc) => {
+      // Find the OLD bar that may have user-defined segments
+      const oldBc = existingBarChords.find((bc) => bc.bar === newBc.bar);
+
+      // Calculate bar-relative tick positions
+      const barStartTick = newBc.bar * ticks_per_bar;
+      const localStart = Math.max(0, selectionRange.startTick - barStartTick);
+      const localEnd = Math.min(ticks_per_bar, selectionRange.endTick - barStartTick);
+
+      // For bars outside the adapted range, preserve old segments entirely
+      if (newBc.bar < startBar || newBc.bar > endBar) {
+        return { ...newBc, segments: oldBc?.segments };
+      }
+
+      // Whole bar: set chord directly, clear segments
+      if (localStart === 0 && localEnd === ticks_per_bar) {
+        return { ...newBc, chord: newChord, segments: undefined };
+      }
+
+      // Sub-bar: splice the new chord into OLD segments (not the empty newBc.segments!)
+      const splicedSegments = spliceSegment(
+        oldBc?.segments,
+        oldBc?.chord ?? newBc.chord,
+        ticks_per_bar,
+        localStart,
+        localEnd,
+        newChord,
+      );
+
+      // Remove segments covering rests (no notes)
+      const newSegments = removeRestSegments(
+        splicedSegments,
+        barStartTick,
+        selectedClip.gesture.onsets,
+        selectedClip.gesture.durations,
+      );
+
+      // If result is trivial (single full-bar segment), simplify to chord field
+      if (isTrivialSegments(newSegments, ticks_per_bar)) {
+        return { ...newBc, chord: newSegments[0]?.chord ?? null, segments: undefined };
+      }
+
+      // If no segments left (all were rests), keep the bar's auto-detected chord
+      if (newSegments.length === 0) {
+        return newBc;
+      }
+
+      return { ...newBc, segments: newSegments };
+    });
+
+    const updated: Clip = {
+      ...selectedClip,
+      harmonic: { ...updatedHarmonic, barChords: updatedBarChords },
+    };
+
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    setSelectionRange(null); // Clear selection after adapting
+    refreshClips();
+  }, [selectedClip, db, selectionRange, refreshClips]);
+
+  // Escape key clears range selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectionRange) {
+        setSelectionRange(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectionRange]);
+
+  // Enter key sets chord segment (when selection exists with detected chord)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger in input fields
+      if (e.target instanceof HTMLElement && e.target.matches('input, textarea')) return;
+
+      if (e.key === 'Enter' && selectionRange && rangeChordInfo?.chord) {
+        e.preventDefault();
+        handleOverrideBarChords();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectionRange, rangeChordInfo, handleOverrideBarChords]);
+
   const handleTogglePlayback = useCallback(() => {
     if (selectedClip) toggle(selectedClip);
   }, [selectedClip, toggle]);
@@ -255,6 +518,11 @@ export function MidiCurator() {
             onPlay={() => play(selectedClip)}
             onPause={pause}
             onStop={stop}
+            selectionRange={selectionRange}
+            onRangeSelect={setSelectionRange}
+            rangeChordInfo={rangeChordInfo}
+            onOverrideChord={handleOverrideBarChords}
+            onAdaptChord={handleAdaptChord}
           />
         ) : (
           <div className="mc-main">

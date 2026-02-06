@@ -1,45 +1,285 @@
-import type { BarChordInfo } from '../types/clip';
+import { useState, useEffect, useRef } from 'react';
+import type { BarChordInfo, ChordSegment, DetectedChord } from '../types/clip';
+import type { TickRange } from '../lib/piano-roll';
 
 interface ChordBarProps {
   barChords: BarChordInfo[];
+  ticksPerBar: number;
+  ticksPerBeat: number;
+  selectionRange?: TickRange | null;
+  onSegmentClick?: (startTick: number, endTick: number) => void;
+  onChordEdit?: (startTick: number, endTick: number, newChordSymbol: string) => void;
+}
+
+/**
+ * Format a chord for display in a cell or segment.
+ */
+function formatChordDisplay(
+  chord: DetectedChord | null,
+  pitchClasses: number[],
+): { displayText: string; isEmpty: boolean } {
+  if (chord) {
+    return { displayText: chord.symbol, isEmpty: false };
+  }
+  if (pitchClasses.length > 0) {
+    const pcsStr = `[${[...pitchClasses].sort((a, b) => a - b).join(',')}]`;
+    return { displayText: `?? ${pcsStr}`, isEmpty: false };
+  }
+  return { displayText: '—', isEmpty: true };
+}
+
+/**
+ * Inline editing input for chord symbols.
+ */
+function ChordEditInput({
+  initialValue,
+  onSubmit,
+  onCancel,
+}: {
+  initialValue: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Focus and select all text when mounted
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (value.trim()) {
+        onSubmit(value.trim());
+      } else {
+        onCancel();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      className="mc-chord-edit-input"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={handleKeyDown}
+      onBlur={onCancel}
+    />
+  );
+}
+
+/**
+ * Render a single chord segment within a bar.
+ */
+function ChordSegmentCell({
+  segment,
+  ticksPerBar,
+  pitchClasses,
+  isSelected,
+  isEditing,
+  onClick,
+  onDoubleClick,
+  onEditSubmit,
+  onEditCancel,
+}: {
+  segment: ChordSegment;
+  ticksPerBar: number;
+  pitchClasses: number[];
+  isSelected: boolean;
+  isEditing: boolean;
+  onClick?: () => void;
+  onDoubleClick?: () => void;
+  onEditSubmit?: (value: string) => void;
+  onEditCancel?: () => void;
+}) {
+  const leftPercent = (segment.startTick / ticksPerBar) * 100;
+  const widthPercent = ((segment.endTick - segment.startTick) / ticksPerBar) * 100;
+  const { displayText, isEmpty } = formatChordDisplay(segment.chord, pitchClasses);
+
+  return (
+    <div
+      className={`mc-chord-bar-segment ${isEmpty ? 'mc-chord-bar-segment--empty' : ''} ${isSelected ? 'mc-chord-bar-segment--selected' : ''} ${isEditing ? 'mc-chord-bar-segment--editing' : ''}`}
+      style={{
+        left: `${leftPercent}%`,
+        width: `${widthPercent}%`,
+        cursor: onClick ? 'pointer' : undefined,
+      }}
+      title={!isEditing ? (segment.chord ? segment.chord.qualityName : undefined) : undefined}
+      onClick={!isEditing ? onClick : undefined}
+      onDoubleClick={!isEditing ? onDoubleClick : undefined}
+    >
+      {isEditing && onEditSubmit && onEditCancel ? (
+        <ChordEditInput
+          initialValue={segment.chord?.symbol ?? ''}
+          onSubmit={onEditSubmit}
+          onCancel={onEditCancel}
+        />
+      ) : (
+        <span className="mc-chord-bar-symbol">{displayText}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Check if a segment matches the current selection range.
+ */
+function isSegmentSelected(
+  barIndex: number,
+  segment: ChordSegment,
+  ticksPerBar: number,
+  selectionRange: TickRange | null | undefined,
+): boolean {
+  if (!selectionRange) return false;
+  const barStartTick = barIndex * ticksPerBar;
+  const segStartAbs = barStartTick + segment.startTick;
+  const segEndAbs = barStartTick + segment.endTick;
+  return selectionRange.startTick === segStartAbs && selectionRange.endTick === segEndAbs;
 }
 
 /**
  * Horizontal bar showing detected chord per bar.
  * Placed above the piano roll to show the harmonic progression.
+ * Supports sub-bar segments for bars with multiple chords.
+ * Click a segment or cell to select it.
+ * Double-click to edit the chord symbol inline.
  */
-export function ChordBar({ barChords }: ChordBarProps) {
+export function ChordBar({
+  barChords,
+  ticksPerBar,
+  ticksPerBeat,
+  selectionRange,
+  onSegmentClick,
+  onChordEdit,
+}: ChordBarProps) {
+  // Track which cell/segment is being edited: { bar, segmentIndex } or null
+  // segmentIndex = -1 means editing the whole bar (single-chord cell)
+  const [editingCell, setEditingCell] = useState<{ bar: number; segmentIndex: number } | null>(null);
+
   if (barChords.length === 0) return null;
+
+  // Match piano roll sizing: totalTicks = (numBars * ticksPerBar) + ticksPerBeat (end padding)
+  const numBars = barChords.length;
+  const totalTicks = numBars * ticksPerBar + ticksPerBeat;
+  const barWidthPercent = (ticksPerBar / totalTicks) * 100;
+
+  const handleDoubleClick = (bar: number, segmentIndex: number) => {
+    if (onChordEdit) {
+      setEditingCell({ bar, segmentIndex });
+    }
+  };
+
+  const handleEditSubmit = (startTick: number, endTick: number, newSymbol: string) => {
+    setEditingCell(null);
+    if (onChordEdit) {
+      onChordEdit(startTick, endTick, newSymbol);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditingCell(null);
+  };
 
   return (
     <div className="mc-chord-bar">
       {barChords.map((bc) => {
-        // Format pitch class set for display
-        const pcsStr = bc.pitchClasses.length > 0
-          ? `[${bc.pitchClasses.sort((a, b) => a - b).join(',')}]`
-          : '';
+        // Check if this bar has multiple segments
+        const hasSegments = bc.segments && bc.segments.length > 1;
+        const barStartTick = bc.bar * ticksPerBar;
 
-        const displayText = bc.chord
-          ? bc.chord.symbol
-          : bc.pitchClasses.length > 0
-            ? `?? ${pcsStr}`
-            : '—';
+        if (hasSegments) {
+          // Render segmented bar with chord inheritance
+          let prevChord: DetectedChord | null = null;
+          return (
+            <div
+              key={bc.bar}
+              className="mc-chord-bar-cell mc-chord-bar-cell--segmented"
+              style={{ width: `${barWidthPercent}%` }}
+              title={`Bar ${bc.bar + 1}: ${bc.segments!.length} segments`}
+            >
+              {bc.segments!.map((seg, i) => {
+                // Use previous chord if this segment has no chord (resonance principle)
+                const effectiveChord = seg.chord ?? prevChord;
+                if (seg.chord) prevChord = seg.chord; // Update for next segment
 
-        const titleText = bc.chord
-          ? `Bar ${bc.bar + 1}: ${bc.chord.symbol} (${bc.chord.qualityName})`
+                const effectiveSeg = { ...seg, chord: effectiveChord };
+                const isSelected = isSegmentSelected(bc.bar, seg, ticksPerBar, selectionRange);
+                const isEditing = editingCell?.bar === bc.bar && editingCell?.segmentIndex === i;
+                const segStartAbs = barStartTick + seg.startTick;
+                const segEndAbs = barStartTick + seg.endTick;
+
+                return (
+                  <ChordSegmentCell
+                    key={i}
+                    segment={effectiveSeg}
+                    ticksPerBar={ticksPerBar}
+                    pitchClasses={bc.pitchClasses}
+                    isSelected={isSelected}
+                    isEditing={isEditing}
+                    onClick={
+                      onSegmentClick
+                        ? () => onSegmentClick(segStartAbs, segEndAbs)
+                        : undefined
+                    }
+                    onDoubleClick={() => handleDoubleClick(bc.bar, i)}
+                    onEditSubmit={(value) => handleEditSubmit(segStartAbs, segEndAbs, value)}
+                    onEditCancel={handleEditCancel}
+                  />
+                );
+              })}
+            </div>
+          );
+        }
+
+        // Single chord (or single segment) - render normally
+        const effectiveChord = bc.segments?.[0]?.chord ?? bc.chord;
+        const { displayText, isEmpty } = formatChordDisplay(effectiveChord, bc.pitchClasses);
+
+        // Check if this whole bar is selected
+        const barEndTick = barStartTick + ticksPerBar;
+        const isBarSelected =
+          selectionRange &&
+          selectionRange.startTick === barStartTick &&
+          selectionRange.endTick === barEndTick;
+        const isEditing = editingCell?.bar === bc.bar && editingCell?.segmentIndex === -1;
+
+        const titleText = effectiveChord
+          ? `Bar ${bc.bar + 1}: ${effectiveChord.symbol} (${effectiveChord.qualityName})`
           : bc.pitchClasses.length > 0
-            ? `Bar ${bc.bar + 1}: unrecognized structure ${pcsStr}`
+            ? `Bar ${bc.bar + 1}: unrecognized structure [${bc.pitchClasses.sort((a, b) => a - b).join(',')}]`
             : `Bar ${bc.bar + 1}: no notes`;
 
         return (
           <div
             key={bc.bar}
-            className={`mc-chord-bar-cell ${bc.chord ? '' : 'mc-chord-bar-cell--empty'}`}
-            title={titleText}
+            className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isBarSelected ? 'mc-chord-bar-cell--selected' : ''} ${isEditing ? 'mc-chord-bar-cell--editing' : ''}`}
+            style={{
+              width: `${barWidthPercent}%`,
+              cursor: onSegmentClick ? 'pointer' : undefined,
+            }}
+            title={!isEditing ? titleText : undefined}
+            onClick={!isEditing && onSegmentClick ? () => onSegmentClick(barStartTick, barEndTick) : undefined}
+            onDoubleClick={!isEditing ? () => handleDoubleClick(bc.bar, -1) : undefined}
           >
-            <span className="mc-chord-bar-symbol">
-              {displayText}
-            </span>
+            {isEditing ? (
+              <ChordEditInput
+                initialValue={effectiveChord?.symbol ?? ''}
+                onSubmit={(value) => handleEditSubmit(barStartTick, barEndTick, value)}
+                onCancel={handleEditCancel}
+              />
+            ) : (
+              <span className="mc-chord-bar-symbol">{displayText}</span>
+            )}
           </div>
         );
       })}

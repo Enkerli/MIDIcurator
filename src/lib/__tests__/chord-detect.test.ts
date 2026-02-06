@@ -266,12 +266,32 @@ describe('detectChordsPerBar', () => {
     expect(bars[1].chord!.quality.key).toBe('min');
   });
 
-  it('returns null for bars with fewer than 2 notes', () => {
+  it('inherits chord from previous bar when empty (resonance principle)', () => {
+    // Bar 0: C major (3 notes), Bar 1: empty
+    const pitches = [60, 64, 67];
+    const onsets = [0, 0, 0];
+    const bars = detectChordsPerBar(pitches, onsets, 480, 2);
+
+    expect(bars[0].chord).not.toBeNull(); // C major
+    expect(bars[1].chord).not.toBeNull(); // Inherited from bar 0
+    expect(bars[1].chord!.root).toBe(0);  // Still C
+  });
+
+  it('first bar remains null if empty (nothing to inherit)', () => {
+    const pitches = [60, 64, 67];
+    const onsets = [480, 480, 480]; // All in bar 1
+    const bars = detectChordsPerBar(pitches, onsets, 480, 2);
+
+    expect(bars[0].chord).toBeNull();     // Nothing to inherit
+    expect(bars[1].chord).not.toBeNull(); // C major
+  });
+
+  it('single note bar still inherits from previous (fewer than 2 notes)', () => {
     const pitches = [60];
     const onsets = [0];
     const bars = detectChordsPerBar(pitches, onsets, 480, 2);
-    expect(bars[0].chord).toBeNull(); // only 1 note
-    expect(bars[1].chord).toBeNull(); // empty bar
+    expect(bars[0].chord).toBeNull(); // only 1 note, nothing to inherit
+    expect(bars[1].chord).toBeNull(); // empty, but previous was also null
   });
 
   it('returns correct bar count', () => {
@@ -282,19 +302,20 @@ describe('detectChordsPerBar', () => {
   it('includes sustained notes from previous bar when durations provided', () => {
     // 3 notes start at tick 0 with long durations that span into bar 1
     // No new notes start in bar 1
-    // Without durations: bar 1 is empty
-    // With durations: bar 1 should still detect the sustained chord
+    // Without durations: bar 1 inherits from bar 0 (resonance principle)
+    // With durations: bar 1 detects the sustained chord directly
     const pitches =  [60, 64, 67]; // C major
     const onsets =   [0,  0,  0];
     const durations = [960, 960, 960]; // 2 bars long
     const ticksPerBar = 480;
 
-    // Without durations
+    // Without durations - inherits from bar 0
     const barsNoDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2);
     expect(barsNoDur[0].chord).not.toBeNull();
-    expect(barsNoDur[1].chord).toBeNull(); // no notes onset in bar 1
+    expect(barsNoDur[1].chord).not.toBeNull(); // inherited from bar 0
+    expect(barsNoDur[1].chord!.root).toBe(0); // C (inherited)
 
-    // With durations
+    // With durations - detects sustained notes directly
     const barsWithDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
     expect(barsWithDur[0].chord).not.toBeNull();
     expect(barsWithDur[1].chord).not.toBeNull(); // sustained into bar 1
@@ -303,18 +324,20 @@ describe('detectChordsPerBar', () => {
   });
 
   it('sustained notes combine with new onsets for richer detection', () => {
-    // Bar 0: C and E start with long sustain
+    // Bar 0: C and E start with long sustain (2 notes = no chord detected)
     // Bar 1: G starts, and C+E are still sounding → full C major
     const pitches =  [60, 64, 67];
     const onsets =   [0,  0,  480];
     const durations = [960, 960, 240];
     const ticksPerBar = 480;
 
-    // Without durations: bar 1 has only G (1 note) → no chord
+    // Without durations: bar 0 has C+E (2 notes, no recognized chord), bar 1 has only G (1 note)
+    // Bar 0 null → bar 1 inherits null
     const barsNoDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2);
-    expect(barsNoDur[1].chord).toBeNull(); // just one note onset
+    expect(barsNoDur[0].chord).toBeNull(); // C+E alone is not a recognized chord
+    expect(barsNoDur[1].chord).toBeNull(); // inherited null from bar 0
 
-    // With durations: bar 1 has G onset + C,E sustained → C major
+    // With durations: bar 1 has G onset + C,E sustained → full C major detected directly
     const barsWithDur = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
     expect(barsWithDur[1].chord).not.toBeNull();
     expect(barsWithDur[1].chord!.root).toBe(0); // C
@@ -323,6 +346,7 @@ describe('detectChordsPerBar', () => {
 
   it('notes that ended before bar start are not included', () => {
     // Note ends exactly at bar boundary — should NOT be included in next bar
+    // But bar 1 inherits from bar 0 (resonance principle)
     const pitches =  [60, 64, 67];
     const onsets =   [0,  0,  0];
     const durations = [480, 480, 480]; // end exactly at bar 1 start
@@ -330,7 +354,9 @@ describe('detectChordsPerBar', () => {
 
     const bars = detectChordsPerBar(pitches, onsets, ticksPerBar, 2, durations);
     expect(bars[0].chord).not.toBeNull(); // notes in bar 0
-    expect(bars[1].chord).toBeNull(); // notes ended at boundary, not sounding
+    expect(bars[1].chord).not.toBeNull(); // inherited from bar 0 (resonance principle)
+    expect(bars[1].chord!.root).toBe(bars[0].chord!.root); // same chord
+    expect(bars[1].pitchClasses).toHaveLength(0); // but no actual pitches in bar 1
   });
 
   it('alternating chord pattern with sustained notes', () => {

@@ -35,6 +35,16 @@ export interface DetectedChord {
   qualityName: string;
 }
 
+/** A sub-bar chord segment (for bars with multiple chords). */
+export interface ChordSegment {
+  /** Start tick relative to bar start (0 = beginning of bar) */
+  startTick: number;
+  /** End tick relative to bar start (up to ticks_per_bar) */
+  endTick: number;
+  /** The chord assigned to this segment */
+  chord: DetectedChord | null;
+}
+
 /** Per-bar chord detection result. */
 export interface BarChordInfo {
   /** Bar index (0-based) */
@@ -43,6 +53,9 @@ export interface BarChordInfo {
   chord: DetectedChord | null;
   /** Unique pitch classes in this bar */
   pitchClasses: number[];
+  /** Optional sub-bar chord segments (manual override only).
+   *  When present with length > 1, segments take priority over `chord` for rendering. */
+  segments?: ChordSegment[];
 }
 
 /** Pitch layer extracted from a set of notes. */

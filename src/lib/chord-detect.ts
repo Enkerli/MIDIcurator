@@ -186,6 +186,62 @@ export interface BarChord {
  * @param durations   Optional array of note durations in ticks.
  *                    When provided, notes sustaining into a bar are included.
  */
+/** Tolerance for "simultaneous" note starts/ends (in ticks). */
+const BLOCK_TOLERANCE = 30;
+
+/** Check if chord quality is a "simple" triad (preferred in detection). */
+function isSimpleTriad(qualityKey: string): boolean {
+  return ['maj', 'min', '5'].includes(qualityKey);
+}
+
+/**
+ * Detect chord blocks within a set of note indices.
+ * Groups notes that start and end together into blocks.
+ */
+function detectBlocksInBar(
+  indices: number[],
+  onsets: number[],
+  durations: number[],
+): Array<{ noteIndices: number[]; startTick: number; endTick: number }> {
+  if (indices.length === 0) return [];
+
+  // Group by quantized onset
+  const groups = new Map<number, number[]>();
+  for (const i of indices) {
+    const onset = onsets[i]!;
+    const key = Math.round(onset / BLOCK_TOLERANCE) * BLOCK_TOLERANCE;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(i);
+  }
+
+  // Convert groups to blocks, verify notes end together
+  const blocks: Array<{ noteIndices: number[]; startTick: number; endTick: number }> = [];
+  for (const [, noteIndices] of groups) {
+    const starts = noteIndices.map(i => onsets[i]!);
+    const ends = noteIndices.map(i => onsets[i]! + durations[i]!);
+
+    const minStart = Math.min(...starts);
+    const maxEnd = Math.max(...ends);
+    const endSpread = Math.max(...ends) - Math.min(...ends);
+
+    // Only treat as block if notes end together (within tolerance)
+    if (endSpread <= BLOCK_TOLERANCE) {
+      blocks.push({ startTick: minStart, endTick: maxEnd, noteIndices });
+    } else {
+      // Notes don't end together - treat each note as its own "block"
+      for (const i of noteIndices) {
+        blocks.push({
+          startTick: onsets[i]!,
+          endTick: onsets[i]! + durations[i]!,
+          noteIndices: [i],
+        });
+      }
+    }
+  }
+
+  return blocks.sort((a, b) => a.startTick - b.startTick);
+}
+
 export function detectChordsPerBar(
   pitches: number[],
   onsets: number[],
@@ -199,7 +255,8 @@ export function detectChordsPerBar(
     const barStart = bar * ticksPerBar;
     const barEnd = barStart + ticksPerBar;
 
-    const barPitches: number[] = [];
+    // Collect note indices in this bar
+    const barIndices: number[] = [];
     for (let i = 0; i < onsets.length; i++) {
       const onset = onsets[i]!;
       const dur = durations ? durations[i]! : 0;
@@ -210,12 +267,62 @@ export function detectChordsPerBar(
       // 2. Note started before but is still sounding in this bar
       if ((onset >= barStart && onset < barEnd) ||
           (durations && onset < barStart && noteEnd > barStart)) {
-        barPitches.push(pitches[i]!);
+        barIndices.push(i);
       }
     }
 
+    // All pitches in bar (for pitchClasses field)
+    const barPitches = barIndices.map(i => pitches[i]!);
     const barPcs = [...new Set(barPitches.map(p => ((p % 12) + 12) % 12))];
-    const chord = barPitches.length >= 2 ? detectChord(barPitches) : null;
+
+    // Detect chord using block-aware logic if durations available
+    let chord: ChordMatch | null = null;
+    if (durations && barIndices.length >= 2) {
+      // Use block detection to find the dominant chord
+      const blocks = detectBlocksInBar(barIndices, onsets, durations);
+
+      // Find blocks with 3+ notes (likely full triads or larger chords)
+      const chordBlocks = blocks.filter(b => b.noteIndices.length >= 3);
+
+      if (chordBlocks.length > 0) {
+        // Score each block to find the "main" chord
+        // Prefer: more notes, strong beat positions (1 and 4), simpler chord qualities
+        const ticksPerBeat = ticksPerBar / 4; // Assume 4/4 time
+        const scoredBlocks = chordBlocks.map(block => {
+          const localTick = block.startTick - barStart;
+          const beat = Math.floor(localTick / ticksPerBeat);
+          const beatBonus = (beat === 0 || beat === 3) ? 2 : 0; // Strong beats
+
+          const blockPitches = block.noteIndices.map(i => pitches[i]!);
+          const blockChord = detectChord(blockPitches);
+          const qualityBonus = blockChord && isSimpleTriad(blockChord.quality.key) ? 1 : 0;
+
+          return {
+            block,
+            chord: blockChord,
+            score: block.noteIndices.length * 10 + beatBonus + qualityBonus
+          };
+        });
+
+        // Select block with highest score
+        const best = scoredBlocks.reduce((a, b) => b.score > a.score ? b : a);
+        chord = best.chord;
+      }
+
+      // If no chord from blocks (or no 3+ note blocks), try all pitches
+      // This handles sustained notes + new onsets forming a complete chord
+      if (!chord) {
+        chord = detectChord(barPitches);
+      }
+    } else if (barPitches.length >= 2) {
+      // Fallback: no durations, use all pitches
+      chord = detectChord(barPitches);
+    }
+
+    // Empty bar inherits previous chord (resonance principle: chord sustains until next change)
+    if (chord === null && bar > 0 && bars[bar - 1]) {
+      chord = bars[bar - 1].chord;
+    }
 
     bars.push({
       bar,

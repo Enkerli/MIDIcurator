@@ -162,3 +162,111 @@ export async function downloadVariantsAsZip(
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Generate chord detection debug JSON with detailed timing and note info.
+ */
+export function generateChordDebugJSON(clip: Clip): string {
+  const { gesture, harmonic, bpm } = clip;
+  const ticksPerBar = gesture.ticks_per_bar;
+  const ticksPerBeat = gesture.ticks_per_beat;
+
+  // Build per-bar analysis with detailed note info
+  const barAnalysis = harmonic.barChords?.map(bc => {
+    const barStart = bc.bar * ticksPerBar;
+    const barEnd = barStart + ticksPerBar;
+
+    // Find notes in this bar (onset in bar OR sustaining into bar)
+    const notesInBar: Array<{
+      index: number;
+      pitch: number;
+      pitchClass: number;
+      pitchName: string;
+      onset: number;
+      duration: number;
+      endTick: number;
+      sustainedFromPrevious: boolean;
+    }> = [];
+
+    for (let i = 0; i < gesture.onsets.length; i++) {
+      const onset = gesture.onsets[i]!;
+      const dur = gesture.durations[i]!;
+      const noteEnd = onset + dur;
+      const pitch = harmonic.pitches[i]!;
+
+      // Include if note is sounding in this bar
+      if ((onset >= barStart && onset < barEnd) ||
+          (onset < barStart && noteEnd > barStart)) {
+        const pc = ((pitch % 12) + 12) % 12;
+        const noteNames = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+        notesInBar.push({
+          index: i,
+          pitch,
+          pitchClass: pc,
+          pitchName: noteNames[pc]!,
+          onset,
+          duration: dur,
+          endTick: noteEnd,
+          sustainedFromPrevious: onset < barStart,
+        });
+      }
+    }
+
+    return {
+      bar: bc.bar,
+      barStartTick: barStart,
+      barEndTick: barEnd,
+      detectedChord: bc.chord ? {
+        symbol: bc.chord.symbol,
+        root: bc.chord.root,
+        rootName: bc.chord.rootName,
+        quality: bc.chord.qualityKey,
+        qualityName: bc.chord.qualityName,
+      } : null,
+      pitchClasses: bc.pitchClasses,
+      segments: bc.segments,
+      notesInBar,
+      noteCount: notesInBar.length,
+      distinctPitchClasses: [...new Set(notesInBar.map(n => n.pitchClass))].sort((a, b) => a - b),
+    };
+  }) ?? [];
+
+  const debug = {
+    exportedAt: new Date().toISOString(),
+    filename: clip.filename,
+    clipId: clip.id,
+    bpm,
+    timing: {
+      ticksPerBeat,
+      ticksPerBar,
+      numBars: gesture.num_bars,
+      totalNotes: gesture.onsets.length,
+    },
+    overallChord: harmonic.detectedChord ? {
+      symbol: harmonic.detectedChord.symbol,
+      root: harmonic.detectedChord.root,
+      rootName: harmonic.detectedChord.rootName,
+      quality: harmonic.detectedChord.qualityKey,
+    } : null,
+    barChords: barAnalysis,
+  };
+
+  return JSON.stringify(debug, null, 2);
+}
+
+/**
+ * Download chord debug JSON for a clip.
+ */
+export function downloadChordDebug(clip: Clip): void {
+  const json = generateChordDebugJSON(clip);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${clip.filename.replace(/\.mid$/i, '')}_chord-debug.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

@@ -1,5 +1,7 @@
-import type { Clip } from '../types/clip';
+import { useCallback } from 'react';
+import type { Clip, DetectedChord } from '../types/clip';
 import type { PlaybackState } from '../lib/playback';
+import type { TickRange } from '../lib/piano-roll';
 import { StatsGrid } from './StatsGrid';
 import { PianoRoll } from './PianoRoll';
 import { ChordBar } from './ChordBar';
@@ -8,6 +10,8 @@ import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
 import { ActionBar } from './ActionBar';
 import { VariantInfo } from './VariantInfo';
+import { downloadChordDebug } from '../lib/midi-export';
+import { parseChordSymbol } from '../lib/chord-parser';
 
 interface ClipDetailProps {
   clip: Clip;
@@ -33,6 +37,15 @@ interface ClipDetailProps {
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
+  selectionRange: TickRange | null;
+  onRangeSelect: (range: TickRange | null) => void;
+  rangeChordInfo: {
+    chord: DetectedChord | null;
+    pitchClasses: number[];
+    noteCount: number;
+  } | null;
+  onOverrideChord: () => void;
+  onAdaptChord?: (newChord: DetectedChord) => void;
 }
 
 export function ClipDetail({
@@ -59,10 +72,29 @@ export function ClipDetail({
   onPlay,
   onPause,
   onStop,
+  selectionRange,
+  onRangeSelect,
+  rangeChordInfo,
+  onOverrideChord,
+  onAdaptChord,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
   const hasFilenameMatch = clip.filename.match(/(\d+)[-_\s]?bpm/i);
+
+  // Handle inline chord editing from chord bar
+  const handleChordBarEdit = useCallback(
+    (startTick: number, endTick: number, newSymbol: string) => {
+      const parsed = parseChordSymbol(newSymbol);
+      if (parsed && onAdaptChord) {
+        // First select the range, then adapt
+        onRangeSelect({ startTick, endTick });
+        // Use setTimeout to ensure selection is applied before adaptation
+        setTimeout(() => onAdaptChord(parsed), 0);
+      }
+    },
+    [onRangeSelect, onAdaptChord],
+  );
 
   return (
     <div className="mc-main">
@@ -77,13 +109,22 @@ export function ClipDetail({
           onStop={onStop}
         />
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
-          <ChordBar barChords={clip.harmonic.barChords} />
+          <ChordBar
+            barChords={clip.harmonic.barChords}
+            ticksPerBar={clip.gesture.ticks_per_bar}
+            ticksPerBeat={clip.gesture.ticks_per_beat}
+            selectionRange={selectionRange}
+            onSegmentClick={(startTick, endTick) => onRangeSelect({ startTick, endTick })}
+            onChordEdit={handleChordBarEdit}
+          />
         )}
         <PianoRoll
           clip={clip}
           playbackTime={playbackTime}
           isPlaying={playbackState === 'playing'}
           height={240}
+          selectionRange={selectionRange}
+          onRangeSelect={onRangeSelect}
         />
       </div>
 
@@ -96,11 +137,21 @@ export function ClipDetail({
         onStartEditBpm={onStartEditBpm}
         playbackTime={playbackTime}
         isPlaying={playbackState === 'playing'}
+        rangeChordInfo={rangeChordInfo}
+        onOverrideChord={onOverrideChord}
+        onAdaptChord={onAdaptChord}
       />
 
       <div className="mc-debug-info">
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Timing Debug Info:</strong>
+          <button
+            className="mc-btn--small"
+            onClick={() => downloadChordDebug(clip)}
+            title="Download detailed chord detection data as JSON"
+          >
+            Export Chord Debug
+          </button>
         </div>
         <div>
           Ticks per beat:{' '}

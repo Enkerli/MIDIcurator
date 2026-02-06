@@ -114,11 +114,16 @@ export function transformGesture(
     newGesture.num_bars,
     durations,
   );
-  const barChords: BarChordInfo[] = barMatches.map(bm => ({
-    bar: bm.bar,
-    chord: matchToDetectedChord(bm.chord),
-    pitchClasses: bm.pitchClasses,
-  }));
+  const barChords: BarChordInfo[] = barMatches.map((bm, i) => {
+    // Preserve segments from source if bar index matches (manual overrides)
+    const sourceBarChord = harmonic.barChords?.[i];
+    return {
+      bar: bm.bar,
+      chord: matchToDetectedChord(bm.chord),
+      pitchClasses: bm.pitchClasses,
+      segments: sourceBarChord?.segments,
+    };
+  });
 
   const newHarmonic: Harmonic = {
     pitches,
