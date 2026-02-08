@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { Clip, DetectedChord } from '../types/clip';
 import type { PlaybackState } from '../lib/playback';
 import type { TickRange } from '../lib/piano-roll';
@@ -82,6 +82,16 @@ export function ClipDetail({
   const variantCount = clips.filter(c => c.source === clip.id).length;
   const hasFilenameMatch = clip.filename.match(/(\d+)[-_\s]?bpm/i);
 
+  // Compute totalTicks to match the piano roll's extent exactly.
+  // This ensures the ChordBar bars align with the PianoRoll grid.
+  const totalTicks = useMemo(() => {
+    const { onsets, durations, ticks_per_beat } = clip.gesture;
+    const lastTick = Math.max(
+      ...onsets.map((onset, i) => onset + durations[i]!),
+    );
+    return lastTick + ticks_per_beat;
+  }, [clip.gesture]);
+
   // Handle inline chord editing from chord bar
   const handleChordBarEdit = useCallback(
     (startTick: number, endTick: number, newSymbol: string) => {
@@ -113,6 +123,7 @@ export function ClipDetail({
             barChords={clip.harmonic.barChords}
             ticksPerBar={clip.gesture.ticks_per_bar}
             ticksPerBeat={clip.gesture.ticks_per_beat}
+            totalTicks={totalTicks}
             selectionRange={selectionRange}
             onSegmentClick={(startTick, endTick) => onRangeSelect({ startTick, endTick })}
             onChordEdit={handleChordBarEdit}

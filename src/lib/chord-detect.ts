@@ -100,7 +100,7 @@ function findExactMatch(uniquePcs: number[]): ChordMatch | null {
   });
 
   const best = candidates[0];
-  return buildMatch(best.root, best.quality);
+  return buildMatch(best.root, best.quality, uniquePcs);
 }
 
 function findBestSubsetMatch(uniquePcs: number[]): ChordMatch | null {
@@ -145,20 +145,47 @@ function findBestSubsetMatch(uniquePcs: number[]): ChordMatch | null {
   });
 
   const best = candidates[0];
-  return buildMatch(best.root, best.quality);
+  return buildMatch(best.root, best.quality, uniquePcs);
 }
 
-function buildMatch(root: number, quality: ChordQuality): ChordMatch {
+/** Map a root-relative semitone distance to a readable interval label. */
+function intervalLabel(semitones: number): string {
+  const labels: Record<number, string> = {
+    0: 'R', 1: 'b9', 2: '9', 3: '#9', 4: '3', 5: '11',
+    6: '#11', 7: '5', 8: 'b13', 9: '13', 10: 'b7', 11: '7',
+  };
+  return labels[semitones] ?? `+${semitones}`;
+}
+
+function buildMatch(root: number, quality: ChordQuality, observedPcsAbsolute: number[]): ChordMatch {
   const rn = rootName(root);
+
+  // Compute absolute template PCs
+  const templatePcs = quality.pcs.map(pc => (pc + root) % 12).sort((a, b) => a - b);
+  const templateSet = new Set(templatePcs);
+  const observedSet = new Set(observedPcsAbsolute);
+
+  const extras = observedPcsAbsolute.filter(pc => !templateSet.has(pc)).sort((a, b) => a - b);
+  const missing = templatePcs.filter(pc => !observedSet.has(pc)).sort((a, b) => a - b);
+
+  // Build symbol: base quality + extras suffix
   const display = quality.displayName;
-  // For major triad, displayName is "" so symbol is just the root
-  const symbol = `${rn}${display}`;
+  let extrasSuffix = '';
+  if (extras.length > 0) {
+    const extraIntervals = extras.map(pc => `add${intervalLabel((pc - root + 12) % 12)}`);
+    extrasSuffix = `(${extraIntervals.join(',')})`;
+  }
+  const symbol = `${rn}${display}${extrasSuffix}`;
 
   return {
     root,
     rootName: rn,
     quality,
     symbol,
+    observedPcs: [...observedSet].sort((a, b) => a - b),
+    templatePcs,
+    extras,
+    missing,
   };
 }
 
@@ -285,28 +312,37 @@ export function detectChordsPerBar(
       const chordBlocks = blocks.filter(b => b.noteIndices.length >= 3);
 
       if (chordBlocks.length > 0) {
-        // Score each block to find the "main" chord
-        // Prefer: more notes, strong beat positions (1 and 4), simpler chord qualities
-        const ticksPerBeat = ticksPerBar / 4; // Assume 4/4 time
-        const scoredBlocks = chordBlocks.map(block => {
-          const localTick = block.startTick - barStart;
-          const beat = Math.floor(localTick / ticksPerBeat);
-          const beatBonus = (beat === 0 || beat === 3) ? 2 : 0; // Strong beats
+        // Strategy: merge all chord-block pitches first — within a bar,
+        // arpeggiated/broken patterns collectively spell one harmony.
+        const mergedPitches = chordBlocks.flatMap(b =>
+          b.noteIndices.map(i => pitches[i]!)
+        );
+        const mergedChord = detectChord(mergedPitches);
 
-          const blockPitches = block.noteIndices.map(i => pitches[i]!);
-          const blockChord = detectChord(blockPitches);
-          const qualityBonus = blockChord && isSimpleTriad(blockChord.quality.key) ? 1 : 0;
+        if (mergedChord) {
+          chord = mergedChord;
+        } else {
+          // Merged set too dense / unrecognizable — fall back to best single block
+          const ticksPerBeat = ticksPerBar / 4;
+          const scoredBlocks = chordBlocks.map(block => {
+            const localTick = block.startTick - barStart;
+            const beat = Math.floor(localTick / ticksPerBeat);
+            const beatBonus = (beat === 0 || beat === 3) ? 2 : 0;
 
-          return {
-            block,
-            chord: blockChord,
-            score: block.noteIndices.length * 10 + beatBonus + qualityBonus
-          };
-        });
+            const blockPitches = block.noteIndices.map(i => pitches[i]!);
+            const blockChord = detectChord(blockPitches);
+            const qualityBonus = blockChord && isSimpleTriad(blockChord.quality.key) ? 1 : 0;
 
-        // Select block with highest score
-        const best = scoredBlocks.reduce((a, b) => b.score > a.score ? b : a);
-        chord = best.chord;
+            return {
+              block,
+              chord: blockChord,
+              score: block.noteIndices.length * 10 + beatBonus + qualityBonus
+            };
+          });
+
+          const best = scoredBlocks.reduce((a, b) => b.score > a.score ? b : a);
+          chord = best.chord;
+        }
       }
 
       // If no chord from blocks (or no 3+ note blocks), try all pitches

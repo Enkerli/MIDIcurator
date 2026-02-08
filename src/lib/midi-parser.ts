@@ -98,11 +98,16 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
         const microsecondsPerBeat = (metaData[0]! << 16) | (metaData[1]! << 8) | metaData[2]!;
         const bpm = Math.round(60000000 / microsecondsPerBeat);
         events.push({ delta, type: 'tempo', bpm });
+      } else if (metaType === 0x58 && length >= 2) {
+        // Time Signature: nn/2^dd
+        const numerator = metaData[0]!;
+        const denominator = Math.pow(2, metaData[1]!);
+        events.push({ delta, type: 'timeSig', numerator, denominator });
       } else if (metaType === 0x2F) {
         // End of Track
         break;
       }
-      // All other meta events silently consumed (time sig, key sig, text, etc.)
+      // Other meta events silently consumed (key sig, text, etc.)
     } else if (status === 0xF0 || status === 0xF7) {
       // SysEx events — variable-length data
       let length = 0;
@@ -187,4 +192,20 @@ export function extractBPM(midiData: ParsedMidi): number {
     }
   }
   return 120;
+}
+
+/**
+ * Extract the first time signature from MIDI data.
+ * Returns [numerator, denominator] (e.g. [3, 4] for 3/4 time).
+ * Defaults to [4, 4] if no time signature event is found.
+ */
+export function extractTimeSignature(midiData: ParsedMidi): [number, number] {
+  for (const track of midiData.tracks) {
+    for (const event of track) {
+      if (event.type === 'timeSig') {
+        return [event.numerator!, event.denominator!];
+      }
+    }
+  }
+  return [4, 4];
 }

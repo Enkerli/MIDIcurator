@@ -359,6 +359,39 @@ describe('detectChordsPerBar', () => {
     expect(bars[1].pitchClasses).toHaveLength(0); // but no actual pitches in bar 1
   });
 
+  it('merges multiple blocks in one bar to detect full chord', () => {
+    // Simulates the Ghosthack bar 2 issue: beat 1 has {D, F, A} and beat 3 has {Bb, G, D}
+    // Together they spell G minor 7 (G, Bb, D, F) + A as a 9th → Gm9 or at least Gm7
+    // Previously the algorithm picked only beat-1 block → D minor (wrong)
+    const pitches =    [53, 62, 57,  58, 55, 62];
+    //                  F4  D5  A4   Bb4 G4  D5
+    const onsets =     [0,  0,  0,   240, 240, 240];
+    const durations =  [96, 96, 96,  96,  96,  96];
+    const ticksPerBar = 480;
+
+    const bars = detectChordsPerBar(pitches, onsets, ticksPerBar, 1, durations);
+    expect(bars[0].chord).not.toBeNull();
+    // Merged pitches: {F, D, A, Bb, G} = {G, A, Bb, D, F} → should detect G as root
+    expect(bars[0].chord!.root).toBe(7); // G
+  });
+
+  it('falls back to best single block when merged set is unrecognizable', () => {
+    // Two unrelated blocks that together don't form a known chord
+    // Beat 1: C major {C, E, G}, beat 3: F# major {F#, A#, C#}
+    // Merged: {C, C#, E, F#, G, A#} — no known chord
+    const pitches =    [60, 64, 67,  66, 70, 61];
+    //                  C4  E4  G4   F#4 A#4 C#4
+    const onsets =     [0,  0,  0,   240, 240, 240];
+    const durations =  [96, 96, 96,  96,  96,  96];
+    const ticksPerBar = 480;
+
+    const bars = detectChordsPerBar(pitches, onsets, ticksPerBar, 1, durations);
+    expect(bars[0].chord).not.toBeNull();
+    // Should fall back to one of the two triads rather than null
+    const root = bars[0].chord!.root;
+    expect([0, 6]).toContain(root); // C or F#
+  });
+
   it('alternating chord pattern with sustained notes', () => {
     // Simulates the Ghosthack issue: chords sustain across 2 bars each
     // Bar 0-1: Eb sus4 (Eb, Ab, Bb)
@@ -430,5 +463,65 @@ describe('detectChord — jazz voicings', () => {
     expect(match).not.toBeNull();
     expect(match!.root).toBe(0);
     expect(match!.quality.key).toBe('6add9');
+  });
+});
+
+// ─── ChordMatch model: extras, missing, observedPcs ─────────────────
+
+describe('ChordMatch — extras & observed PCs (HARMONY_ENGINE §3–4)', () => {
+  it('{D,F,G,A} → Dm(add4) as recognized quality', () => {
+    // D(2), F(5), G(7), A(9) — dictionary has madd4 = minor added fourth
+    const match = detectChord([62, 65, 67, 69]);
+    expect(match).not.toBeNull();
+    expect(match!.root).toBe(2); // D
+    expect(match!.quality.key).toBe('madd4'); // exact match from dictionary
+    expect(match!.extras).toHaveLength(0); // all tones explained by template
+    expect(match!.observedPcs).toEqual(expect.arrayContaining([2, 5, 7, 9]));
+  });
+
+  it('extras populated when input has tones outside template', () => {
+    // D minor + Eb (passing tone): {D, Eb, F, A} → D minor with Eb extra
+    const match = detectChord([62, 63, 65, 69]);
+    expect(match).not.toBeNull();
+    expect(match!.root).toBe(2); // D
+    expect(match!.quality.key).toBe('min'); // base chord is D minor
+    expect(match!.extras).toContain(3); // Eb (pc 3) is extra
+    expect(match!.observedPcs).toEqual(expect.arrayContaining([2, 3, 5, 9]));
+    expect(match!.symbol).toContain('add'); // symbol should reflect the extra
+  });
+
+  it('{D,G,A} → Dsus4', () => {
+    // D(2), G(7), A(9)
+    const match = detectChord([62, 67, 69]);
+    expect(match).not.toBeNull();
+    expect(match!.root).toBe(2); // D
+    expect(match!.quality.key).toBe('sus4');
+    expect(match!.extras).toHaveLength(0); // exact match, no extras
+  });
+
+  it('exact match has empty extras and missing', () => {
+    const match = detectChord([60, 64, 67]); // C major
+    expect(match).not.toBeNull();
+    expect(match!.extras).toHaveLength(0);
+    expect(match!.missing).toHaveLength(0);
+    expect(match!.observedPcs).toEqual([0, 4, 7]);
+    expect(match!.templatePcs).toEqual([0, 4, 7]);
+  });
+
+  it('observed PCs are never discarded', () => {
+    // 5-note input: C, E, G, Bb, D → C9
+    const match = detectChord([60, 64, 67, 70, 74]);
+    expect(match).not.toBeNull();
+    // All 5 PCs must appear in observedPcs
+    expect(match!.observedPcs).toEqual(expect.arrayContaining([0, 2, 4, 7, 10]));
+    expect(match!.observedPcs).toHaveLength(5);
+  });
+
+  it('subset match reports extras correctly', () => {
+    // C major + F# passing tone: {C, E, F#, G} → C major with F# extra
+    const match = detectChord([60, 64, 66, 67]);
+    expect(match).not.toBeNull();
+    expect(match!.extras.length).toBeGreaterThan(0);
+    expect(match!.observedPcs).toEqual(expect.arrayContaining([0, 4, 6, 7]));
   });
 });

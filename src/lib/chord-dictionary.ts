@@ -37,8 +37,16 @@ export interface ChordMatch {
   rootName: string;
   /** Matched chord quality */
   quality: ChordQuality;
-  /** Full chord symbol (e.g. "Cmaj7", "F#-7") */
+  /** Full chord symbol (e.g. "Cmaj7", "F#-7", "D-(add4)") */
   symbol: string;
+  /** All observed pitch classes (absolute, 0-11) — never discarded */
+  observedPcs: number[];
+  /** Template pitch classes from the matched quality (absolute, 0-11) */
+  templatePcs: number[];
+  /** Observed PCs not in the template (absolute, 0-11) */
+  extras: number[];
+  /** Template PCs not observed */
+  missing: number[];
 }
 
 // ─── Note name utilities ───────────────────────────────────────────────

@@ -23,16 +23,28 @@ export function computeSyncopation(
   return onsets.length > 0 ? score / onsets.length : 0;
 }
 
-export function extractGesture(notes: Note[], ticksPerBeat: number): Gesture {
+/**
+ * @param timeSignature Optional [numerator, denominator] (defaults to [4, 4]).
+ */
+export function extractGesture(
+  notes: Note[],
+  ticksPerBeat: number,
+  timeSignature?: [number, number],
+): Gesture {
   const onsets = notes.map(n => n.ticks);
   const durations = notes.map(n => n.durationTicks);
   const velocities = notes.map(n => n.velocity);
 
-  const ticksPerBar = ticksPerBeat * 4; // Assume 4/4
+  const [tsNum, tsDenom] = timeSignature ?? [4, 4];
+  // ticksPerBeat = one quarter note. Scale to actual time signature:
+  // e.g. 3/4 → 3 quarter-note beats → ticksPerBar = 3 * ticksPerBeat
+  // e.g. 6/8 → 6 eighth-note beats → ticksPerBar = 6 * (ticksPerBeat / 2)
+  const ticksPerBar = tsNum * ticksPerBeat * (4 / tsDenom);
+  const beatsPerBar = tsNum * (4 / tsDenom); // in quarter-note units
   const lastTick = Math.max(...notes.map(n => n.ticks + n.durationTicks));
   const numBars = Math.ceil(lastTick / ticksPerBar);
 
-  const totalBeats = numBars * 4;
+  const totalBeats = numBars * beatsPerBar;
   const density = notes.length / totalBeats;
 
   const avgVelocity = velocities.reduce((a, b) => a + b, 0) / velocities.length;

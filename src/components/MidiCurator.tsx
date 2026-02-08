@@ -3,7 +3,7 @@ import type { Clip, DetectedChord } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
-import { parseMIDI, extractNotes, extractBPM } from '../lib/midi-parser';
+import { parseMIDI, extractNotes, extractBPM, extractTimeSignature } from '../lib/midi-parser';
 import { extractGesture, extractHarmonic } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
@@ -153,7 +153,8 @@ export function MidiCurator() {
           bpm = extractBPM(midiData);
         }
 
-        const gesture = extractGesture(notes, midiData.ticksPerBeat);
+        const timeSig = extractTimeSignature(midiData);
+        const gesture = extractGesture(notes, midiData.ticksPerBeat, timeSig);
         const harmonic = extractHarmonic(notes, gesture);
 
         const clip: Clip = {
@@ -245,21 +246,18 @@ export function MidiCurator() {
       return { pitches, pcs, pcsKey: pcs.join(','), chord, score };
     });
 
-    // Check if all blocks have the same pitch class set
-    const uniquePcsSets = [...new Set(blockInfo.map(b => b.pcsKey))];
+    // Strategy: merge all block pitches first — within a selection,
+    // arpeggiated/broken patterns collectively spell one harmony.
+    const allPitches = blockInfo.flatMap(b => b.pitches);
+    let match = detectChord(allPitches);
 
-    let pitchesToDetect: number[];
-    if (uniquePcsSets.length === 1) {
-      // All blocks are the same chord - use first block's pitches
-      pitchesToDetect = blockInfo[0]?.pitches ?? [];
-    } else {
-      // Multiple different chords - use the block with highest score
+    if (!match) {
+      // Merged set too dense / unrecognizable — fall back to best single block
       const best = blockInfo.reduce((a, b) => b.score > a.score ? b : a);
-      pitchesToDetect = best.pitches;
+      match = detectChord(best.pitches);
     }
 
-    const match = detectChord(pitchesToDetect);
-    const pitchClasses = [...new Set(pitchesToDetect.map(p => ((p % 12) + 12) % 12))];
+    const pitchClasses = [...new Set(allPitches.map(p => ((p % 12) + 12) % 12))];
 
     const chord: DetectedChord | null = match
       ? {

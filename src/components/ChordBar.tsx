@@ -6,6 +6,8 @@ interface ChordBarProps {
   barChords: BarChordInfo[];
   ticksPerBar: number;
   ticksPerBeat: number;
+  /** Total tick span matching the piano roll (note extent + padding). */
+  totalTicks?: number;
   selectionRange?: TickRange | null;
   onSegmentClick?: (startTick: number, endTick: number) => void;
   onChordEdit?: (startTick: number, endTick: number, newChordSymbol: string) => void;
@@ -158,6 +160,7 @@ export function ChordBar({
   barChords,
   ticksPerBar,
   ticksPerBeat,
+  totalTicks: totalTicksProp,
   selectionRange,
   onSegmentClick,
   onChordEdit,
@@ -168,9 +171,10 @@ export function ChordBar({
 
   if (barChords.length === 0) return null;
 
-  // Match piano roll sizing: totalTicks = (numBars * ticksPerBar) + ticksPerBeat (end padding)
+  // Use the same total tick span as the piano roll for alignment.
+  // Falls back to bar-grid approximation when totalTicks is not provided.
   const numBars = barChords.length;
-  const totalTicks = numBars * ticksPerBar + ticksPerBeat;
+  const totalTicks = totalTicksProp ?? (numBars * ticksPerBar + ticksPerBeat);
   const barWidthPercent = (ticksPerBar / totalTicks) * 100;
 
   const handleDoubleClick = (bar: number, segmentIndex: number) => {
