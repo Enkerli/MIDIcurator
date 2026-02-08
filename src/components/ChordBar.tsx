@@ -19,15 +19,16 @@ interface ChordBarProps {
 function formatChordDisplay(
   chord: DetectedChord | null,
   pitchClasses: number[],
-): { displayText: string; isEmpty: boolean } {
+): { displayText: string; isEmpty: boolean; hasExtras: boolean } {
   if (chord) {
-    return { displayText: chord.symbol, isEmpty: false };
+    const hasExtras = (chord.extras?.length ?? 0) > 0;
+    return { displayText: chord.symbol, isEmpty: false, hasExtras };
   }
   if (pitchClasses.length > 0) {
     const pcsStr = `[${[...pitchClasses].sort((a, b) => a - b).join(',')}]`;
-    return { displayText: `?? ${pcsStr}`, isEmpty: false };
+    return { displayText: `?? ${pcsStr}`, isEmpty: false, hasExtras: false };
   }
-  return { displayText: '—', isEmpty: true };
+  return { displayText: '—', isEmpty: true, hasExtras: false };
 }
 
 /**
@@ -106,7 +107,7 @@ function ChordSegmentCell({
 }) {
   const leftPercent = (segment.startTick / ticksPerBar) * 100;
   const widthPercent = ((segment.endTick - segment.startTick) / ticksPerBar) * 100;
-  const { displayText, isEmpty } = formatChordDisplay(segment.chord, pitchClasses);
+  const { displayText, isEmpty, hasExtras } = formatChordDisplay(segment.chord, pitchClasses);
 
   return (
     <div
@@ -127,7 +128,7 @@ function ChordSegmentCell({
           onCancel={onEditCancel}
         />
       ) : (
-        <span className="mc-chord-bar-symbol">{displayText}</span>
+        <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>{displayText}</span>
       )}
     </div>
   );
@@ -247,7 +248,7 @@ export function ChordBar({
 
         // Single chord (or single segment) - render normally
         const effectiveChord = bc.segments?.[0]?.chord ?? bc.chord;
-        const { displayText, isEmpty } = formatChordDisplay(effectiveChord, bc.pitchClasses);
+        const { displayText, isEmpty, hasExtras } = formatChordDisplay(effectiveChord, bc.pitchClasses);
 
         // Check if this whole bar is selected
         const barEndTick = barStartTick + ticksPerBar;
@@ -257,8 +258,11 @@ export function ChordBar({
           selectionRange.endTick === barEndTick;
         const isEditing = editingCell?.bar === bc.bar && editingCell?.segmentIndex === -1;
 
+        const extrasInfo = hasExtras && effectiveChord?.extras
+          ? ` | extras: [${effectiveChord.extras.join(',')}]`
+          : '';
         const titleText = effectiveChord
-          ? `Bar ${bc.bar + 1}: ${effectiveChord.symbol} (${effectiveChord.qualityName})`
+          ? `Bar ${bc.bar + 1}: ${effectiveChord.symbol} (${effectiveChord.qualityName})${extrasInfo}`
           : bc.pitchClasses.length > 0
             ? `Bar ${bc.bar + 1}: unrecognized structure [${bc.pitchClasses.sort((a, b) => a - b).join(',')}]`
             : `Bar ${bc.bar + 1}: no notes`;
@@ -282,7 +286,7 @@ export function ChordBar({
                 onCancel={handleEditCancel}
               />
             ) : (
-              <span className="mc-chord-bar-symbol">{displayText}</span>
+              <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>{displayText}</span>
             )}
           </div>
         );

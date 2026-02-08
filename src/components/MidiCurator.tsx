@@ -266,6 +266,10 @@ export function MidiCurator() {
           qualityKey: match.quality.key,
           symbol: match.symbol,
           qualityName: match.quality.fullName,
+          observedPcs: match.observedPcs,
+          templatePcs: match.templatePcs,
+          extras: match.extras,
+          missing: match.missing,
         }
       : null;
 

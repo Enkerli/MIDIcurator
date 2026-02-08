@@ -873,3 +873,8 @@ body {
 .mc-chord-bar-cell--editing .mc-chord-edit-input {
   font-size: 12px;
 }
+
+/* Visual indicator for chords with extra notes beyond the template */
+.mc-chord-bar-symbol--has-extras {
+  border-bottom: 2px dotted var(--mc-accent);
+}

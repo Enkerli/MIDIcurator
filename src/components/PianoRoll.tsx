@@ -110,6 +110,17 @@ export function PianoRoll({
         ctx.stroke();
       }
 
+      // Bar number labels (top of each bar line)
+      ctx.fillStyle = theme.label;
+      ctx.font = '9px system-ui';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      for (const line of gridLines) {
+        if (line.isBar) {
+          ctx.fillText(line.label, line.x + 3, 2);
+        }
+      }
+
       // Pitch labels (left gutter, only C notes and edges)
       ctx.fillStyle = theme.label;
       ctx.font = '9px system-ui';

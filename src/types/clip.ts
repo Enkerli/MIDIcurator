@@ -33,6 +33,14 @@ export interface DetectedChord {
   symbol: string;
   /** Human-readable quality name (e.g. "major seventh") */
   qualityName: string;
+  /** Pitch classes actually observed in the input (0-11, sorted) */
+  observedPcs?: number[];
+  /** Pitch classes of the matched chord template (0-11, sorted) */
+  templatePcs?: number[];
+  /** Pitch classes in observed but not in template (extras / passing tones) */
+  extras?: number[];
+  /** Pitch classes in template but not observed (missing tones) */
+  missing?: number[];
 }
 
 /** A sub-bar chord segment (for bars with multiple chords). */
