@@ -1,164 +1,194 @@
-# Segmentation Implementation Plan
+# MIDIcurator — Roadmap & Prioritized Next Steps
 
-## Clarification: MIDI "comments"
-
-SMF (.mid) files are binary — there's no `;` comment syntax. The `;` convention
-exists in ABC notation and some MIDI text formats, but not in standard `.mid`.
-The right approach (already specified in `docs/METADATA_MIDI.md`) is:
-- **Marker meta events (0x06)** — visible in most DAWs as markers/cue points
-- **Text meta events (0x01)** — machine-readable JSON payload
-
-This is the standard way to embed annotations in MIDI files.
+*Updated 2026-02-09. Previous segmentation plan (Phases A–D) is complete.*
 
 ---
 
-## Phase A — Data Model + MIDI Metadata (foundation)
+## Done (Segmentation)
 
-**Goal**: Clip-level segmentation state persisted in IndexedDB; MIDI export
-embeds MCURATOR markers; MIDI import reads them back. Independently valuable:
-exported .mid files carry harmonic annotations even before the scissors tool.
-
-### A1. Extend Clip type with segmentation state
-- **File**: `src/types/clip.ts`
-- Add `segmentation?: { boundaries: number[] }` to `Clip` interface
-- Boundaries are absolute tick positions; segments derived as
-  `[0…b1), [b1…b2), …[bn…end]`
-- Optional field → backward-compatible with existing IndexedDB clips
-
-### A2. Parse marker (0x06) and text (0x01) meta events
-- **Files**: `src/types/midi.ts`, `src/lib/midi-parser.ts`
-- Add `'marker' | 'text'` to `MidiEvent.type` union
-- Add `text?: string` field to `MidiEvent`
-- In `parseTrack()`, decode metaType 0x01 and 0x06 as UTF-8 text
-- Add `extractMcuratorSegments(midiData)` — scan for `MCURATOR v1 SEG`
-  markers, return `{ boundaries, segmentChords }`
-
-### A3. Write MCURATOR metadata in MIDI export
-- **File**: `src/lib/midi-export.ts`
-- Helper: `encodeTextMeta(type: 0x01 | 0x06, text: string): number[]`
-- At tick 0: write file-level `MCURATOR:v1 { "type":"file", ... }` text event
-- For each segment boundary: write marker + text JSON at the segment's tick
-- Modify `createMIDITrack()` to accept optional segmentation + barChords
-- Interleave metadata events with note events via tick sort
-
-### A4. Tests
-- Round-trip: create MIDI with segments → parse → extract → match
-- Marker-only and JSON-only parsing
-- Unknown fields don't break parsing
-- Variable-length text encoding edge cases
-
-**Commit point**: "Add MCURATOR metadata to MIDI export/import"
+All phases shipped in commit `ad2f711`:
+- **Phase A**: Clip-level `Segmentation` type, MCURATOR v1 MIDI metadata
+  (marker + JSON text events), round-trip import/export
+- **Phase B**: Scissors tool (S key), boundary snapping, click-to-cut,
+  Shift+click/right-click to remove
+- **Phase C**: `detectChordsForSegments()` with sustained-note inclusion,
+  segment-aware ChordBar rendering, reanalysis on every boundary change
+- **Phase D**: Draggable boundaries (click-drag in scissors mode),
+  sustained notes attributed to segments where they're sounding
 
 ---
 
-## Phase B — Scissors Tool (interaction)
+## Prioritized Next Steps
 
-**Goal**: Users can place and see segmentation boundaries on the piano roll.
-Chord labels update immediately.
+### Tier 1 — Quick Wins (low effort, high value)
 
-### B1. Segmentation mode toggle
-- **Files**: `src/components/MidiCurator.tsx`, `src/components/ClipDetail.tsx`
-- New state: `scissorsMode: boolean`
-- Toggle button near piano roll (✂ icon)
-- Keyboard shortcut: `S` to toggle
-- When active, PianoRoll switches from drag-select to click-to-cut
+#### 1.1 Empty segments display "–" instead of inherited chord
+**Status**: Bug fix
+**Effort**: ~30 min
+**Files**: `src/components/ChordBar.tsx`, possibly `src/lib/chord-detect.ts`
 
-### B2. PianoRoll scissors interaction
-- **File**: `src/components/PianoRoll.tsx`
-- New props: `scissorsMode`, `boundaries`, `onBoundaryAdd`
-- **Hover guide line**: in scissors mode, mousemove draws a vertical dashed
-  line at the snapped tick position
-- **Click to cut**: mousedown in scissors mode calls `onBoundaryAdd(tick)`
-- **Render boundaries**: existing boundaries as colored dashed vertical lines
-  (orange, distinct from bar grid)
+Empty segments (no note onsets within their range) currently show a chord
+inherited via resonance. When a segment has been *explicitly created* by
+the scissors tool and contains no notes, it should display "–" (empty).
 
-### B3. Boundary snapping (note-content-focused)
-- **File**: `src/lib/piano-roll.ts`
-- New function: `snapForScissors(rawTick, onsets, durations, ticksPerBeat)`
-- Priority order:
-  1. Note onset within tolerance (half a beat)
-  2. Note end within tolerance
-  3. Beat grid (if no notes nearby)
-- Shift key disables snapping entirely
-- Never snap more than 1 beat away from click position
+The resonance principle should remain for *bar-level* detection but not
+for explicitly segmented regions. The fix is likely in
+`detectChordsForSegments()` — don't apply resonance when the segment has
+an explicit boundary, or have ChordBar distinguish "inherited" from
+"detected" chords.
 
-### B4. Boundary management in state
-- **File**: `src/components/MidiCurator.tsx`
-- `addBoundary(tick)`: insert into sorted array, deduplicate
-- `removeBoundary(tick)`: remove (right-click or Shift+click on existing)
-- Persist to clip in IndexedDB on change
-- Trigger reanalysis pipeline
+#### 1.2 Keyboard navigation: arrow keys for clips & segments
+**Status**: New feature
+**Effort**: ~1–2h
+**Files**: `src/components/MidiCurator.tsx`, `src/components/Sidebar.tsx`
 
-### B5. Segment-aware ChordBar rendering
-- **File**: `src/components/ChordBar.tsx`
-- When segmentation boundaries exist, render segment-based labels
-  instead of bar-based labels
-- Each segment shows its detected chord, proportional width
-- Boundary separators visible
+- **Up/Down arrows**: navigate between clips in the sidebar list
+- **Left/Right arrows** (or Tab/Shift-Tab): navigate between segments in
+  the current clip (when segmentation exists)
+- Follows standard list navigation conventions
+- Arrows only active when no input is focused
 
-**Commit point**: "Scissors tool: place and render segmentation boundaries"
+#### 1.3 Auto-tag single-chord clips
+**Status**: New feature
+**Effort**: ~1–2h
+**Files**: `src/components/MidiCurator.tsx` or new `src/lib/auto-tag.ts`
+
+Heuristic: if a clip has ≤5 distinct pitch classes, tag it as
+"single-chord" (or with the chord symbol itself). This enables:
+- bulk filtering in the sidebar
+- quick visual scan of which clips are harmonically simple
+- verification workflow: group single-chord clips, user confirms labels
 
 ---
 
-## Phase C — Segment-Aware Chord Detection (analysis)
+### Tier 2 — Medium Effort, High Value
 
-**Goal**: When boundaries exist, chord detection uses segments instead of bars.
+#### 2.1 Dual ChordBar: "realized" + "underlying" (competence/performance)
+**Status**: New feature (significant)
+**Effort**: ~4–6h
+**Files**: New `src/components/LeadsheetBar.tsx`, `src/types/clip.ts`,
+  `src/components/ClipDetail.tsx`
 
-### C1. detectChordsForSegments()
-- **File**: `src/lib/chord-detect.ts`
-- New function: given notes, onsets, durations, and boundary ticks →
-  per-segment chord results
-- Each segment: collect notes whose onset is in [segStart, segEnd)
-- Apply merge-first strategy per segment
-- Notes sustaining across boundaries: attribute to onset segment
+Two layers of harmonic annotation:
 
-### C2. Reanalysis pipeline
-- **File**: `src/components/MidiCurator.tsx`
-- When `clip.segmentation?.boundaries` exists:
-  - Use `detectChordsForSegments()` instead of `detectChordsPerBar()`
-  - Store results alongside segmentation state
-  - Update harmonic display
+1. **Realized** (current ChordBar): shows what's actually played, in
+   MIDI-time proportional segments. Already implemented.
 
-### C3. Segment info in StatsGrid
-- **File**: `src/components/StatsGrid.tsx`
-- Show segment count and progression summary
+2. **Underlying** (new "leadsheet" bar): bar-quantized chord symbols
+   entered manually, like a lead sheet. Format:
+   `Fm7 | Am7 D7 | Abm7 Db7 | Bbm7 Eb7 |`
 
-### C4. Tests
-- Segment detection with notes spanning boundaries
-- Sparse clips, boundary at exact note onset
-- Boundary between notes in same chord block
+   Rules:
+   - All chords within a bar have equal duration (halves if 2, thirds if 3)
+   - A chord can be repeated across bars to make duration explicit
+   - Input via text field or click-to-set per bar
 
-**Commit point**: "Segment-aware chord detection pipeline"
+This second layer informs:
+- identification of extensions vs NCTs (non-chord tones)
+- functional analysis (future: Roman numerals relative to underlying key)
+- comparison between intended harmony and actual realization
+
+#### 2.2 Enharmonic spelling by chord role
+**Status**: Known issue / research
+**Effort**: ~4–8h (potentially complex)
+**Files**: `src/lib/chord-dictionary.ts`, `src/lib/chord-detect.ts`,
+  new `src/lib/spelling.ts`
+
+Current problem: "E♭° diminished triad" is spelled "E♭ F♯ A" — the F♯
+should be G♭ (minor third, not augmented second).
+
+This requires a spelling engine that:
+- assigns note names based on **interval function within the chord**
+  (root, third, fifth, seventh, etc.)
+- uses flats/sharps consistently per chord context
+- handles edge cases (augmented sixths, enharmonic pivot chords)
+
+Approach:
+- Each chord quality defines a **spelling template** (intervals from root
+  as letter-name offsets, not just semitones)
+- Root name + template → spelled note names
+- Extras/NCTs spelled by nearest diatonic interpretation
+
+**Flag**: This has been complicated in prior work. Consider phasing it
+alongside the dual ChordBar (§2.1) and an external validation/testing
+phase. The underlying chord layer would provide context for correct
+spelling of realized notes.
 
 ---
 
-## Phase D — Polish & Edge Cases
+### Tier 3 — Larger Features (high value, higher effort)
 
-### D1. Movable boundaries (drag to reposition)
-- In scissors mode, clicking near an existing boundary initiates a drag
-- Visual feedback during drag, reanalyze on release
+#### 3.1 Auto-segmentation hints
+**Effort**: ~3–4h
+Detect likely chord changes by pitch-class transitions. Display as
+dimmed guide lines on the piano roll. User can accept/reject.
 
-### D2. Notes held across boundaries
-- Option: include sustained notes in both segments with lower weight
-- Or: pitch class attributed to both segments
-- Configurable heuristic
+#### 3.2 Segment info in StatsGrid
+**Effort**: ~1h
+Show segment count and chord progression summary in the stats panel.
 
-### D3. Auto-segmentation hint (future)
-- Detect likely chord changes by pitch class transitions
-- Suggest boundaries as dimmed guide lines
-
-**Commit point**: "Segmentation polish: movable boundaries, sustain handling"
+#### 3.3 Timeline zoom
+**Effort**: ~3–4h
+Zoom the piano roll timeline. Essential for segmentation precision with
+dense patterns. See `docs/OPEN_NOTES.md §7.1`.
 
 ---
 
-## Phasing & Estimates
+### Tier 4 — Wishlist / Future ("smidgen" territory)
 
-| Phase | Effort | Dependencies | Independently valuable? |
-|-------|--------|-------------|------------------------|
-| A     | ~2-3h  | None        | Yes — MIDI metadata     |
-| B     | ~3-4h  | A1          | Yes — visual boundaries |
-| C     | ~2-3h  | B           | Yes — smarter analysis  |
-| D     | ~2h    | C           | Polish                  |
+#### 4.1 Chord paint tool (arp shape)
+Create melodic patterns that follow chord tones: user draws a shape
+(up/down, note durations quantized to grid), tool fills in pitches from
+the current segment's chord. Exists in some DAWs but could be done
+better.
 
-A2/A3 (MIDI metadata) and B2/B3 (scissors UI) can be developed in parallel.
-Each phase produces a pushable commit.
+#### 4.2 Chord roller tool (pads)
+"Paint roller" that fills a segment with the full chord as a pad (all
+notes sounding together for the segment duration). Opposite of
+arpeggiation. Useful for quickly hearing the harmonic content.
+
+#### 4.3 Functional harmony layer
+Roman numeral analysis, T/PD/D classification, cross-key concordance.
+Depends on §2.1 (underlying chord layer) and §2.2 (correct spelling).
+See `docs/OPEN_NOTES.md §2`.
+
+#### 4.4 Concordance analysis of melodic patterns
+Intervallic, functional, and pitch-class concordance.
+See `docs/OPEN_NOTES.md §1`.
+
+#### 4.5 iPadOS touch support
+Selection and segmentation don't work reliably on iPadOS.
+See `docs/OPEN_NOTES.md §7.2`.
+
+---
+
+## Research Notes
+
+### Apple Loops chord metadata
+**Finding**: Apple Loops (.caf/.aiff) store **key + scale type** (Major,
+Minor, Neither, Both) in the `basc` AIFF chunk (2 bytes each at offsets
+0x08–0x0B), plus tempo, time signature, and beat count. There is **no
+per-bar chord progression metadata** in the Apple Loops format. Logic
+Pro's chord display for Apple Loops appears to be derived from real-time
+analysis, not from embedded tags.
+
+The `trns` chunk stores transient markers (sample-frame positions), and
+`cate` stores categorization. None of these carry chord-level data.
+
+Sources:
+- [Reverse Engineering Apple Loops](https://apmatthews.tumblr.com/post/73069916661/reverse-engineering-apple-loops)
+- [Notes for Apple Loops Developers](https://developer.apple.com/library/archive/documentation/AppleApplications/Conceptual/ALU_Notes/ALU%20Notes/ALU%20Notes.html)
+
+**Implication**: MCURATOR's MIDI metadata approach (marker + JSON text
+events) is already more expressive than Apple's format for chord
+annotation. No need to emulate Apple Loops' metadata scheme.
+
+---
+
+## Design Principles (reminders)
+
+- **Curation over production** — not a DAW
+- **Analysis is assistive, not authoritative** — users override
+- **Accuracy matters** — correct spellings and labels are what distinguish
+  useful learning tools from offhand demos
+- **Preserve meaning before optimizing mechanism**
