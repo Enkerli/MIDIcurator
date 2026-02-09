@@ -430,7 +430,6 @@ export function detectChordsForSegments(
   }
 
   const results: SegmentChord[] = [];
-  let prevChord: ChordMatch | null = null;
 
   for (let segIdx = 0; segIdx < ranges.length; segIdx++) {
     const { start, end } = ranges[segIdx]!;
