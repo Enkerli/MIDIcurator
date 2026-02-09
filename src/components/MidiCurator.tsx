@@ -1,15 +1,15 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import type { Clip, DetectedChord } from '../types/clip';
+import type { Clip, DetectedChord, Segmentation, SegmentChordInfo } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
-import { parseMIDI, extractNotes, extractBPM, extractTimeSignature } from '../lib/midi-parser';
-import { extractGesture, extractHarmonic } from '../lib/gesture';
+import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcuratorSegments } from '../lib/midi-parser';
+import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
-import { detectChord } from '../lib/chord-detect';
+import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
 import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
 import { substituteSegmentPitches } from '../lib/chord-substitute';
 import { Sidebar } from './Sidebar';
@@ -27,6 +27,7 @@ export function MidiCurator() {
   const [bpmValue, setBpmValue] = useState('');
   const [densityMultiplier, setDensityMultiplier] = useState(1.0);
   const [selectionRange, setSelectionRange] = useState<TickRange | null>(null);
+  const [scissorsMode, setScissorsMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
@@ -157,6 +158,29 @@ export function MidiCurator() {
         const gesture = extractGesture(notes, midiData.ticksPerBeat, timeSig);
         const harmonic = extractHarmonic(notes, gesture);
 
+        // Extract MCURATOR segmentation metadata (if present)
+        const mcurator = extractMcuratorSegments(midiData);
+        let segmentation: Segmentation | undefined;
+        if (mcurator && mcurator.boundaries.length > 0) {
+          // Recompute segment chords from the restored boundaries
+          const clipEndTick = gesture.num_bars * gesture.ticks_per_bar;
+          const segResults = detectChordsForSegments(
+            harmonic.pitches,
+            gesture.onsets,
+            gesture.durations,
+            mcurator.boundaries,
+            clipEndTick,
+          );
+          const segmentChords: SegmentChordInfo[] = segResults.map(sr => ({
+            index: sr.index,
+            startTick: sr.startTick,
+            endTick: sr.endTick,
+            chord: toDetectedChord(sr.chord),
+            pitchClasses: sr.pitchClasses,
+          }));
+          segmentation = { boundaries: mcurator.boundaries, segmentChords };
+        }
+
         const clip: Clip = {
           id: crypto.randomUUID(),
           filename: file.name,
@@ -166,6 +190,7 @@ export function MidiCurator() {
           harmonic,
           rating: null,
           notes: '',
+          segmentation,
         };
 
         await db.addClip(clip);
@@ -433,16 +458,20 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, selectionRange, refreshClips]);
 
-  // Escape key clears range selection
+  // Escape key clears range selection or exits scissors mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectionRange) {
-        setSelectionRange(null);
+      if (e.key === 'Escape') {
+        if (scissorsMode) {
+          setScissorsMode(false);
+        } else if (selectionRange) {
+          setSelectionRange(null);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectionRange]);
+  }, [selectionRange, scissorsMode]);
 
   // Enter key sets chord segment (when selection exists with detected chord)
   useEffect(() => {
@@ -458,6 +487,88 @@ export function MidiCurator() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectionRange, rangeChordInfo, handleOverrideBarChords]);
+
+  // S key toggles scissors mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.matches('input, textarea')) return;
+      if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && selectedClip) {
+        e.preventDefault();
+        setScissorsMode(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedClip]);
+
+  // ─── Segmentation boundary management ──────────────────────────────
+
+  /**
+   * Compute segment chords for a clip given its boundaries.
+   * Returns the full Segmentation object with segmentChords populated.
+   */
+  const computeSegmentation = useCallback((clip: Clip, boundaries: number[]): Segmentation | undefined => {
+    if (boundaries.length === 0) return undefined;
+
+    const { onsets, durations, ticks_per_bar, num_bars } = clip.gesture;
+    const clipEndTick = num_bars * ticks_per_bar;
+
+    const segResults = detectChordsForSegments(
+      clip.harmonic.pitches,
+      onsets,
+      durations,
+      boundaries,
+      clipEndTick,
+    );
+
+    const segmentChords: SegmentChordInfo[] = segResults.map(sr => ({
+      index: sr.index,
+      startTick: sr.startTick,
+      endTick: sr.endTick,
+      chord: toDetectedChord(sr.chord),
+      pitchClasses: sr.pitchClasses,
+    }));
+
+    return { boundaries, segmentChords };
+  }, []);
+
+  /**
+   * Update the clip with new boundaries (recomputing segment chords), persist, and refresh.
+   */
+  const updateBoundaries = useCallback(async (boundaries: number[]) => {
+    if (!selectedClip || !db) return;
+
+    const segmentation = computeSegmentation(selectedClip, boundaries);
+    const updated: Clip = { ...selectedClip, segmentation };
+
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    refreshClips();
+  }, [selectedClip, db, computeSegmentation, refreshClips]);
+
+  const addBoundary = useCallback(async (tick: number) => {
+    if (!selectedClip) return;
+    const existing = selectedClip.segmentation?.boundaries ?? [];
+    if (existing.includes(tick)) return;
+    const boundaries = [...existing, tick].sort((a, b) => a - b);
+    await updateBoundaries(boundaries);
+  }, [selectedClip, updateBoundaries]);
+
+  const removeBoundary = useCallback(async (tick: number) => {
+    if (!selectedClip?.segmentation) return;
+    const boundaries = selectedClip.segmentation.boundaries.filter(b => b !== tick);
+    await updateBoundaries(boundaries);
+  }, [selectedClip, updateBoundaries]);
+
+  const moveBoundary = useCallback(async (fromTick: number, toTick: number) => {
+    if (!selectedClip?.segmentation) return;
+    const boundaries = selectedClip.segmentation.boundaries
+      .map(b => b === fromTick ? toTick : b)
+      .sort((a, b) => a - b);
+    // Deduplicate (in case moved onto another boundary)
+    const deduped = [...new Set(boundaries)];
+    await updateBoundaries(deduped);
+  }, [selectedClip, updateBoundaries]);
 
   const handleTogglePlayback = useCallback(() => {
     if (selectedClip) toggle(selectedClip);
@@ -525,6 +636,11 @@ export function MidiCurator() {
             rangeChordInfo={rangeChordInfo}
             onOverrideChord={handleOverrideBarChords}
             onAdaptChord={handleAdaptChord}
+            scissorsMode={scissorsMode}
+            onToggleScissors={() => setScissorsMode(prev => !prev)}
+            onAddBoundary={addBoundary}
+            onRemoveBoundary={removeBoundary}
+            onMoveBoundary={moveBoundary}
           />
         ) : (
           <div className="mc-main">

@@ -72,7 +72,7 @@ export function extractGesture(
 /**
  * Convert a ChordMatch from the detection engine into a serializable DetectedChord.
  */
-function toDetectedChord(match: ChordMatch | null): DetectedChord | null {
+export function toDetectedChord(match: ChordMatch | null): DetectedChord | null {
   if (!match) return null;
   return {
     root: match.root,

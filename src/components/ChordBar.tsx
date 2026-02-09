@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { BarChordInfo, ChordSegment, DetectedChord } from '../types/clip';
+import type { BarChordInfo, ChordSegment, DetectedChord, SegmentChordInfo } from '../types/clip';
 import type { TickRange } from '../lib/piano-roll';
 
 interface ChordBarProps {
@@ -11,6 +11,8 @@ interface ChordBarProps {
   selectionRange?: TickRange | null;
   onSegmentClick?: (startTick: number, endTick: number) => void;
   onChordEdit?: (startTick: number, endTick: number, newChordSymbol: string) => void;
+  /** When present, render segment-based view instead of bar-based view. */
+  segmentChords?: SegmentChordInfo[];
 }
 
 /**
@@ -165,6 +167,7 @@ export function ChordBar({
   selectionRange,
   onSegmentClick,
   onChordEdit,
+  segmentChords,
 }: ChordBarProps) {
   // Track which cell/segment is being edited: { bar, segmentIndex } or null
   // segmentIndex = -1 means editing the whole bar (single-chord cell)
@@ -195,6 +198,41 @@ export function ChordBar({
     setEditingCell(null);
   };
 
+  // ─── Segment-based rendering (when segmentation boundaries exist) ────
+  if (segmentChords && segmentChords.length > 0) {
+    return (
+      <div className="mc-chord-bar">
+        {segmentChords.map((seg) => {
+          const widthPercent = ((seg.endTick - seg.startTick) / totalTicks) * 100;
+          const { displayText, isEmpty, hasExtras } = formatChordDisplay(seg.chord, seg.pitchClasses);
+          const isSelected = selectionRange
+            && selectionRange.startTick === seg.startTick
+            && selectionRange.endTick === seg.endTick;
+
+          return (
+            <div
+              key={seg.index}
+              className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isSelected ? 'mc-chord-bar-cell--selected' : ''}`}
+              style={{
+                width: `${widthPercent}%`,
+                cursor: onSegmentClick ? 'pointer' : undefined,
+              }}
+              title={seg.chord
+                ? `Segment ${seg.index + 1}: ${seg.chord.symbol} (${seg.chord.qualityName})`
+                : `Segment ${seg.index + 1}: ${seg.pitchClasses.length > 0 ? `[${seg.pitchClasses.join(',')}]` : 'no notes'}`}
+              onClick={onSegmentClick ? () => onSegmentClick(seg.startTick, seg.endTick) : undefined}
+            >
+              <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>
+                {displayText}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ─── Bar-based rendering (default, no segmentation) ──────────────────
   return (
     <div className="mc-chord-bar">
       {barChords.map((bc) => {

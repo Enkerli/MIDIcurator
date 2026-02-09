@@ -12,6 +12,7 @@ import {
   collectNoteBoundaries,
   snapToNearestBoundary,
   isMinimumDrag,
+  snapForScissors,
 } from '../lib/piano-roll';
 import type { PianoRollLayout, TickRange } from '../lib/piano-roll';
 
@@ -27,7 +28,20 @@ interface PianoRollProps {
   selectionRange: TickRange | null;
   /** Called when user completes a drag selection or clicks to clear */
   onRangeSelect: (range: TickRange | null) => void;
+  /** Whether scissors mode is active */
+  scissorsMode?: boolean;
+  /** Existing segmentation boundary tick positions */
+  boundaries?: number[];
+  /** Called when user clicks to add a boundary in scissors mode */
+  onBoundaryAdd?: (tick: number) => void;
+  /** Called when user right-clicks or shift-clicks to remove a boundary */
+  onBoundaryRemove?: (tick: number) => void;
+  /** Called when user drags a boundary to a new position */
+  onBoundaryMove?: (fromTick: number, toTick: number) => void;
 }
+
+/** Tolerance in pixels for clicking on an existing boundary to remove it. */
+const BOUNDARY_HIT_PX = 8;
 
 /**
  * Read CSS custom properties from the document root for canvas rendering.
@@ -61,6 +75,11 @@ export function PianoRoll({
   height = 240,
   selectionRange,
   onRangeSelect,
+  scissorsMode = false,
+  boundaries = [],
+  onBoundaryAdd,
+  onBoundaryRemove,
+  onBoundaryMove,
 }: PianoRollProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,6 +89,14 @@ export function PianoRoll({
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragCurrentX = useRef(0);
+
+  // Scissors hover state (ref, not reactive — redraw on mousemove)
+  const scissorsHoverTick = useRef<number | null>(null);
+
+  // Boundary drag state (for moving existing boundaries)
+  const isDraggingBoundary = useRef(false);
+  const draggingBoundaryTick = useRef<number | null>(null);
+  const draggingBoundaryCurrentTick = useRef<number | null>(null);
 
   const draw = useCallback(
     (canvas: HTMLCanvasElement, width: number) => {
@@ -148,6 +175,51 @@ export function PianoRoll({
         ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
       }
 
+      // ─── Segmentation boundaries (always rendered when present) ─────
+      if (boundaries.length > 0) {
+        for (const tick of boundaries) {
+          // If this boundary is being dragged, render at drag position instead
+          const isBeingDragged = isDraggingBoundary.current && draggingBoundaryTick.current === tick;
+          const renderTick = isBeingDragged && draggingBoundaryCurrentTick.current !== null
+            ? draggingBoundaryCurrentTick.current
+            : tick;
+
+          const bx = layout.labelWidth + renderTick * layout.pxPerTick;
+          const alpha = isBeingDragged ? 0.6 : 1;
+          // Dashed orange line
+          ctx.strokeStyle = isBeingDragged ? `rgba(232, 135, 42, ${alpha})` : '#e8872a';
+          ctx.lineWidth = isBeingDragged ? 2 : 1.5;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(bx, 0);
+          ctx.lineTo(bx, height);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Small triangle marker at top
+          ctx.fillStyle = isBeingDragged ? `rgba(232, 135, 42, ${alpha})` : '#e8872a';
+          ctx.beginPath();
+          ctx.moveTo(bx - 4, 0);
+          ctx.lineTo(bx + 4, 0);
+          ctx.lineTo(bx, 7);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // ─── Scissors hover guide line ──────────────────────────────────
+      if (scissorsMode && scissorsHoverTick.current !== null) {
+        const hx = layout.labelWidth + scissorsHoverTick.current * layout.pxPerTick;
+        ctx.strokeStyle = 'rgba(232, 135, 42, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(hx, 0);
+        ctx.lineTo(hx, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       // Selection overlay (finalized selection from prop)
       if (selectionRange) {
         const x1 = layout.labelWidth + selectionRange.startTick * layout.pxPerTick;
@@ -182,10 +254,25 @@ export function PianoRoll({
         }
       }
     },
-    [clip, playbackTime, isPlaying, height, selectionRange],
+    [clip, playbackTime, isPlaying, height, selectionRange, scissorsMode, boundaries],
   );
 
-  // ─── Mouse handlers for drag selection ─────────────────────────────
+  // ─── Mouse handlers ─────────────────────────────────────────────────
+
+  /**
+   * Find an existing boundary near a pixel x position (within BOUNDARY_HIT_PX).
+   * Returns the boundary tick or null.
+   */
+  const findBoundaryNear = useCallback((x: number): number | null => {
+    const layout = layoutRef.current;
+    if (!layout || boundaries.length === 0) return null;
+
+    for (const tick of boundaries) {
+      const bx = layout.labelWidth + tick * layout.pxPerTick;
+      if (Math.abs(x - bx) <= BOUNDARY_HIT_PX) return tick;
+    }
+    return null;
+  }, [boundaries]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -198,19 +285,93 @@ export function PianoRoll({
     // Ignore clicks in the label gutter
     if (x < layout.labelWidth) return;
 
+    if (scissorsMode) {
+      const rawTick = xToTick(x, layout);
+      const hitBoundary = findBoundaryNear(x);
+
+      // Shift+click or right-click on existing boundary → remove it
+      if (hitBoundary !== null && (e.shiftKey || e.button === 2)) {
+        onBoundaryRemove?.(hitBoundary);
+        return;
+      }
+
+      // Click on existing boundary → start dragging it
+      if (hitBoundary !== null) {
+        isDraggingBoundary.current = true;
+        draggingBoundaryTick.current = hitBoundary;
+        draggingBoundaryCurrentTick.current = hitBoundary;
+        return;
+      }
+
+      // Click on empty space → add new boundary
+      const snappedTick = snapForScissors(
+        rawTick,
+        clip.gesture.onsets,
+        clip.gesture.durations,
+        clip.gesture.ticks_per_beat,
+        e.shiftKey,
+      );
+      onBoundaryAdd?.(snappedTick);
+      return;
+    }
+
+    // Normal selection mode
     isDragging.current = true;
     dragStartX.current = x;
     dragCurrentX.current = x;
-  }, []);
+  }, [scissorsMode, clip.gesture, findBoundaryNear, onBoundaryAdd, onBoundaryRemove]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDragging.current) return;
     const canvas = canvasRef.current;
     const layout = layoutRef.current;
     if (!canvas || !layout) return;
 
     const rect = canvas.getBoundingClientRect();
-    dragCurrentX.current = e.clientX - rect.left;
+    const x = e.clientX - rect.left;
+
+    if (scissorsMode) {
+      // Boundary drag in progress
+      if (isDraggingBoundary.current) {
+        const rawTick = xToTick(x, layout);
+        draggingBoundaryCurrentTick.current = snapForScissors(
+          rawTick,
+          clip.gesture.onsets,
+          clip.gesture.durations,
+          clip.gesture.ticks_per_beat,
+          e.shiftKey,
+        );
+        // Redraw with boundary at new position
+        const container = containerRef.current;
+        if (container) draw(canvas, container.clientWidth);
+        return;
+      }
+
+      // Scissors mode: show hover guide line
+      if (x < layout.labelWidth) {
+        scissorsHoverTick.current = null;
+      } else {
+        const rawTick = xToTick(x, layout);
+        scissorsHoverTick.current = snapForScissors(
+          rawTick,
+          clip.gesture.onsets,
+          clip.gesture.durations,
+          clip.gesture.ticks_per_beat,
+          e.shiftKey,
+        );
+      }
+
+      // Redraw with hover guide
+      const container = containerRef.current;
+      if (container) {
+        draw(canvas, container.clientWidth);
+      }
+      return;
+    }
+
+    // Normal selection mode: drag preview
+    if (!isDragging.current) return;
+
+    dragCurrentX.current = x;
 
     // Live preview: redraw base then overlay the drag region
     const container = containerRef.current;
@@ -218,7 +379,6 @@ export function PianoRoll({
       draw(canvas, container.clientWidth);
 
       // Draw temporary drag overlay on top
-      // Context is already in CSS-pixel space after draw() applies ctx.scale(dpr, dpr)
       const ctx = canvas.getContext('2d');
       if (ctx) {
         const x1 = Math.min(dragStartX.current, dragCurrentX.current);
@@ -227,9 +387,24 @@ export function PianoRoll({
         ctx.fillRect(x1, 0, x2 - x1, height);
       }
     }
-  }, [draw, height]);
+  }, [scissorsMode, clip.gesture, draw, height]);
 
   const handleMouseUp = useCallback(() => {
+    // Finish boundary drag
+    if (isDraggingBoundary.current) {
+      isDraggingBoundary.current = false;
+      const from = draggingBoundaryTick.current;
+      const to = draggingBoundaryCurrentTick.current;
+      if (from !== null && to !== null && from !== to) {
+        onBoundaryMove?.(from, to);
+      }
+      draggingBoundaryTick.current = null;
+      draggingBoundaryCurrentTick.current = null;
+      return;
+    }
+
+    if (scissorsMode) return; // Scissors mode uses click, not drag
+
     if (!isDragging.current) return;
     isDragging.current = false;
 
@@ -246,16 +421,16 @@ export function PianoRoll({
     }
 
     // Collect note boundaries for snap-to-note functionality
-    const boundaries = collectNoteBoundaries(clip.gesture.onsets, clip.gesture.durations);
+    const noteBounds = collectNoteBoundaries(clip.gesture.onsets, clip.gesture.durations);
 
     const startTick = snapToNearestBoundary(
       Math.min(rawStart, rawEnd),
-      boundaries,
+      noteBounds,
       clip.gesture.ticks_per_beat,
     );
     const endTick = snapToNearestBoundary(
       Math.max(rawStart, rawEnd),
-      boundaries,
+      noteBounds,
       clip.gesture.ticks_per_beat,
     );
 
@@ -266,7 +441,47 @@ export function PianoRoll({
     }
 
     onRangeSelect({ startTick, endTick });
-  }, [clip.gesture.onsets, clip.gesture.durations, clip.gesture.ticks_per_beat, onRangeSelect]);
+  }, [scissorsMode, clip.gesture.onsets, clip.gesture.durations, clip.gesture.ticks_per_beat, onRangeSelect, onBoundaryMove]);
+
+  const handleMouseLeave = useCallback(() => {
+    // Cancel any boundary drag on leave
+    if (isDraggingBoundary.current) {
+      isDraggingBoundary.current = false;
+      draggingBoundaryTick.current = null;
+      draggingBoundaryCurrentTick.current = null;
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (canvas && container) draw(canvas, container.clientWidth);
+      return;
+    }
+
+    if (scissorsMode) {
+      // Clear hover guide
+      scissorsHoverTick.current = null;
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (canvas && container) {
+        draw(canvas, container.clientWidth);
+      }
+      return;
+    }
+    // Normal mode: treat as mouseup
+    handleMouseUp();
+  }, [scissorsMode, draw, handleMouseUp]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (scissorsMode) {
+      e.preventDefault(); // Prevent browser context menu in scissors mode
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const hitBoundary = findBoundaryNear(x);
+      if (hitBoundary !== null) {
+        onBoundaryRemove?.(hitBoundary);
+      }
+    }
+  }, [scissorsMode, findBoundaryNear, onBoundaryRemove]);
 
   // Observe container width for responsive sizing
   useEffect(() => {
@@ -294,11 +509,12 @@ export function PianoRoll({
     <div ref={containerRef} className="mc-piano-roll-container">
       <canvas
         ref={canvasRef}
-        className="mc-piano-roll-canvas"
+        className={`mc-piano-roll-canvas ${scissorsMode ? 'mc-piano-roll-canvas--scissors' : ''}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        onContextMenu={handleContextMenu}
       />
     </div>
   );

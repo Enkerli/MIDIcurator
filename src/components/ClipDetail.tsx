@@ -46,6 +46,11 @@ interface ClipDetailProps {
   } | null;
   onOverrideChord: () => void;
   onAdaptChord?: (newChord: DetectedChord) => void;
+  scissorsMode: boolean;
+  onToggleScissors: () => void;
+  onAddBoundary: (tick: number) => void;
+  onRemoveBoundary: (tick: number) => void;
+  onMoveBoundary: (fromTick: number, toTick: number) => void;
 }
 
 export function ClipDetail({
@@ -77,6 +82,11 @@ export function ClipDetail({
   rangeChordInfo,
   onOverrideChord,
   onAdaptChord,
+  scissorsMode,
+  onToggleScissors,
+  onAddBoundary,
+  onRemoveBoundary,
+  onMoveBoundary,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -111,13 +121,22 @@ export function ClipDetail({
       <h1>{clip.filename}</h1>
 
       <div className="mc-piano-roll-section">
-        <TransportBar
-          state={playbackState}
-          currentTime={playbackTime}
-          onPlay={onPlay}
-          onPause={onPause}
-          onStop={onStop}
-        />
+        <div className="mc-piano-roll-toolbar">
+          <TransportBar
+            state={playbackState}
+            currentTime={playbackTime}
+            onPlay={onPlay}
+            onPause={onPause}
+            onStop={onStop}
+          />
+          <button
+            className={`mc-btn--tool ${scissorsMode ? 'mc-btn--tool-active' : ''}`}
+            onClick={onToggleScissors}
+            title={scissorsMode ? 'Exit scissors mode (S or Esc)' : 'Scissors tool — click to place segment boundaries (S)'}
+          >
+            ✂
+          </button>
+        </div>
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
           <ChordBar
             barChords={clip.harmonic.barChords}
@@ -127,6 +146,7 @@ export function ClipDetail({
             selectionRange={selectionRange}
             onSegmentClick={(startTick, endTick) => onRangeSelect({ startTick, endTick })}
             onChordEdit={handleChordBarEdit}
+            segmentChords={clip.segmentation?.segmentChords}
           />
         )}
         <PianoRoll
@@ -136,6 +156,11 @@ export function ClipDetail({
           height={240}
           selectionRange={selectionRange}
           onRangeSelect={onRangeSelect}
+          scissorsMode={scissorsMode}
+          boundaries={clip.segmentation?.boundaries ?? []}
+          onBoundaryAdd={onAddBoundary}
+          onBoundaryRemove={onRemoveBoundary}
+          onBoundaryMove={onMoveBoundary}
         />
       </div>
 

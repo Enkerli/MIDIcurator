@@ -76,6 +76,28 @@ export interface Harmonic {
   barChords?: BarChordInfo[];
 }
 
+/** Per-segment chord result (computed from notes within the segment). */
+export interface SegmentChordInfo {
+  /** Segment index (0-based). */
+  index: number;
+  /** Absolute start tick of this segment. */
+  startTick: number;
+  /** Absolute end tick of this segment. */
+  endTick: number;
+  /** Detected chord for this segment, or null. */
+  chord: DetectedChord | null;
+  /** Pitch classes present in this segment. */
+  pitchClasses: number[];
+}
+
+/** Segmentation state for a clip. */
+export interface Segmentation {
+  /** Absolute tick positions of segment boundaries (sorted, ascending). */
+  boundaries: number[];
+  /** Per-segment chord detection results (derived from boundaries + notes). */
+  segmentChords?: SegmentChordInfo[];
+}
+
 /** A clip stored in IndexedDB. */
 export interface Clip {
   id: string;
@@ -87,6 +109,7 @@ export interface Clip {
   rating: number | null;
   notes: string;
   source?: string;
+  segmentation?: Segmentation;
 }
 
 /** A tag record in the 'tags' object store. */

@@ -1,4 +1,4 @@
-import type { Gesture, Harmonic, Clip } from '../types/clip';
+import type { Gesture, Harmonic, Clip, Segmentation, BarChordInfo } from '../types/clip';
 import { createZip } from './zip';
 
 export function encodeVariableLength(value: number): number[] {
@@ -14,6 +14,16 @@ export function encodeVariableLength(value: number): number[] {
   return bytes;
 }
 
+/**
+ * Encode a text or marker meta event.
+ * @param metaType 0x01 for text, 0x06 for marker
+ * @param text UTF-8 string content
+ */
+export function encodeTextMeta(metaType: 0x01 | 0x06, text: string): number[] {
+  const textBytes = new TextEncoder().encode(text);
+  return [0xFF, metaType, ...encodeVariableLength(textBytes.length), ...textBytes];
+}
+
 export function createMIDIHeader(format: number, ticksPerBeat: number): number[] {
   return [
     0x4D, 0x54, 0x68, 0x64,                            // "MThd"
@@ -24,18 +34,109 @@ export function createMIDIHeader(format: number, ticksPerBeat: number): number[]
   ];
 }
 
+/**
+ * Build a marker + text JSON pair for a single segment boundary.
+ */
+function buildSegmentEvents(
+  tick: number,
+  segIndex: number,
+  chord: { symbol: string; root: number; observedPcs?: number[]; templatePcs?: number[]; extras?: number[] } | null,
+): Array<{ tick: number; data: number[] }> {
+  const events: Array<{ tick: number; data: number[] }> = [];
+
+  const chordSymbol = chord?.symbol ?? null;
+
+  // Marker event (human-readable, DAW-visible)
+  const markerStr = chordSymbol
+    ? `MCURATOR v1 SEG ${segIndex} CHORD ${chordSymbol}`
+    : `MCURATOR v1 SEG ${segIndex}`;
+  events.push({ tick, data: encodeTextMeta(0x06, markerStr) });
+
+  // Text JSON event (machine-readable, full fidelity)
+  const segJson: Record<string, unknown> = { seg: segIndex };
+  if (chordSymbol) segJson.chord = chordSymbol;
+  if (chord) {
+    segJson.rootPc = chord.root;
+    if (chord.observedPcs) segJson.pcsObs = chord.observedPcs;
+    if (chord.templatePcs) segJson.pcsTpl = chord.templatePcs;
+    if (chord.extras && chord.extras.length > 0) {
+      segJson.extras = chord.extras;
+    }
+  }
+  events.push({ tick, data: encodeTextMeta(0x01, `MCURATOR:v1 ${JSON.stringify(segJson)}`) });
+
+  return events;
+}
+
+/**
+ * Build MCURATOR metadata events (file-level + per-segment) as tick-positioned entries.
+ */
+function buildMetadataEvents(
+  segmentation: Segmentation | undefined,
+  barChords: BarChordInfo[] | undefined,
+  ticksPerBeat: number,
+): Array<{ tick: number; data: number[] }> {
+  const metaEvents: Array<{ tick: number; data: number[] }> = [];
+
+  // File-level text event at tick 0
+  const fileJson = JSON.stringify({
+    type: 'file',
+    schema: 'mcurator-midi',
+    version: 1,
+    createdBy: 'MIDIcurator',
+    createdAt: new Date().toISOString().slice(0, 10),
+    ppq: ticksPerBeat,
+  });
+  metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${fileJson}`) });
+
+  if (!segmentation || segmentation.boundaries.length === 0) return metaEvents;
+
+  // Emit a marker at each actual boundary tick with chord info for the
+  // segment that *follows* the boundary.  On reimport the marker ticks
+  // directly reconstruct the boundaries array (no spurious tick-0 entry).
+  const segChords = segmentation.segmentChords;
+  for (let i = 0; i < segmentation.boundaries.length; i++) {
+    const tick = segmentation.boundaries[i]!;
+    const segIndex = i + 1;
+
+    // Try to find chord info from the segment that starts at this boundary
+    let chord: BarChordInfo['chord'] = null;
+    if (segChords) {
+      const seg = segChords.find(s => s.startTick === tick);
+      if (seg) chord = seg.chord;
+    }
+
+    // Fallback: use barChords to approximate chord at this boundary
+    if (!chord && barChords) {
+      let chordInfo: BarChordInfo | undefined;
+      for (const bc of barChords) {
+        const barStart = bc.bar * (ticksPerBeat * 4);
+        if (barStart <= tick) chordInfo = bc;
+      }
+      chord = chordInfo?.chord ?? null;
+    }
+
+    metaEvents.push(...buildSegmentEvents(tick, segIndex, chord));
+  }
+
+  return metaEvents;
+}
+
 export function createMIDITrack(
   gesture: Gesture,
   harmonic: Harmonic,
   bpm: number,
   _ticksPerBeat: number,
+  segmentation?: Segmentation,
+  barChords?: BarChordInfo[],
 ): number[] {
-  const events: Array<{ delta: number; data: number[] }> = [];
+  // All events as absolute-tick entries, converted to delta at the end
+  const allEvents: Array<{ tick: number; data: number[] }> = [];
 
-  // Set tempo event
+  // Set tempo event at tick 0
   const microsecondsPerBeat = Math.round(60000000 / bpm);
-  events.push({
-    delta: 0,
+  allEvents.push({
+    tick: 0,
     data: [
       0xFF, 0x51, 0x03, // Meta event: Set Tempo
       (microsecondsPerBeat >> 16) & 0xFF,
@@ -44,43 +145,32 @@ export function createMIDITrack(
     ],
   });
 
-  // Create note events
-  const noteEvents: Array<{
-    tick: number;
-    type: 'on' | 'off';
-    note: number;
-    velocity: number;
-  }> = [];
+  // MCURATOR metadata events
+  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat);
+  allEvents.push(...metaEvents);
 
+  // Note events
   for (let i = 0; i < gesture.onsets.length; i++) {
-    noteEvents.push({
+    allEvents.push({
       tick: gesture.onsets[i]!,
-      type: 'on',
-      note: harmonic.pitches[i]!,
-      velocity: gesture.velocities[i]!,
+      data: [0x90, harmonic.pitches[i]!, gesture.velocities[i]!],
     });
-    noteEvents.push({
+    allEvents.push({
       tick: gesture.onsets[i]! + gesture.durations[i]!,
-      type: 'off',
-      note: harmonic.pitches[i]!,
-      velocity: 0,
+      data: [0x80, harmonic.pitches[i]!, 0],
     });
   }
 
-  // Sort by tick
-  noteEvents.sort((a, b) => a.tick - b.tick);
+  // Sort by tick (stable: metadata before notes at same tick)
+  allEvents.sort((a, b) => a.tick - b.tick);
 
-  // Convert to delta times
+  // Convert to delta-time encoded events
+  const events: Array<{ delta: number; data: number[] }> = [];
   let currentTick = 0;
-  for (const event of noteEvents) {
+  for (const event of allEvents) {
     const delta = event.tick - currentTick;
     currentTick = event.tick;
-
-    const status = event.type === 'on' ? 0x90 : 0x80;
-    events.push({
-      delta,
-      data: [status, event.note, event.velocity],
-    });
+    events.push({ delta, data: event.data });
   }
 
   // End of track
@@ -108,10 +198,15 @@ export function createMIDITrack(
   ];
 }
 
-export function createMIDI(gesture: Gesture, harmonic: Harmonic, bpm: number): Uint8Array {
+export function createMIDI(
+  gesture: Gesture,
+  harmonic: Harmonic,
+  bpm: number,
+  segmentation?: Segmentation,
+): Uint8Array {
   const ticksPerBeat = gesture.ticks_per_beat || 480;
   const header = createMIDIHeader(1, ticksPerBeat);
-  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat);
+  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords);
 
   return new Uint8Array([...header, ...track]);
 }
@@ -119,7 +214,7 @@ export function createMIDI(gesture: Gesture, harmonic: Harmonic, bpm: number): U
 // DOM-dependent download helpers (future Electron IPC boundary)
 
 export function downloadMIDI(clip: Clip): void {
-  const midiData = createMIDI(clip.gesture, clip.harmonic, clip.bpm);
+  const midiData = createMIDI(clip.gesture, clip.harmonic, clip.bpm, clip.segmentation);
   const blob = new Blob([midiData], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
 

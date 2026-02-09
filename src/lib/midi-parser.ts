@@ -103,11 +103,19 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
         const numerator = metaData[0]!;
         const denominator = Math.pow(2, metaData[1]!);
         events.push({ delta, type: 'timeSig', numerator, denominator });
+      } else if (metaType === 0x06) {
+        // Marker
+        const text = new TextDecoder().decode(metaData);
+        events.push({ delta, type: 'marker', text });
+      } else if (metaType === 0x01) {
+        // Text event
+        const text = new TextDecoder().decode(metaData);
+        events.push({ delta, type: 'text', text });
       } else if (metaType === 0x2F) {
         // End of Track
         break;
       }
-      // Other meta events silently consumed (key sig, text, etc.)
+      // Other meta events silently consumed (key sig, etc.)
     } else if (status === 0xF0 || status === 0xF7) {
       // SysEx events — variable-length data
       let length = 0;
@@ -208,4 +216,131 @@ export function extractTimeSignature(midiData: ParsedMidi): [number, number] {
     }
   }
   return [4, 4];
+}
+
+/** Parsed segment from MCURATOR metadata. */
+export interface McuratorSegment {
+  tick: number;
+  index: number;
+  chord: string | null;
+  json?: Record<string, unknown>;
+}
+
+/** Result of extracting MCURATOR metadata from a MIDI file. */
+export interface McuratorMetadata {
+  boundaries: number[];
+  segments: McuratorSegment[];
+  fileInfo?: Record<string, unknown>;
+}
+
+const MARKER_PREFIX = 'MCURATOR v1 SEG';
+const TEXT_PREFIX = 'MCURATOR:v1 ';
+
+/**
+ * Parse an MCURATOR marker string.
+ * Format: "MCURATOR v1 SEG <n> CHORD <symbol> [KEY <key>] [FLAGS <flags>]"
+ */
+function parseMarker(text: string): { index: number; chord: string | null } | null {
+  if (!text.startsWith(MARKER_PREFIX)) return null;
+  const rest = text.slice(MARKER_PREFIX.length).trim();
+  const tokens = rest.split(/\s+/);
+  const index = parseInt(tokens[0] ?? '', 10);
+  if (isNaN(index)) return null;
+
+  let chord: string | null = null;
+  const chordIdx = tokens.indexOf('CHORD');
+  if (chordIdx >= 0 && chordIdx + 1 < tokens.length) {
+    chord = tokens[chordIdx + 1]!;
+  }
+  return { index, chord };
+}
+
+/**
+ * Parse an MCURATOR text event JSON payload.
+ * Format: "MCURATOR:v1 <JSON>"
+ */
+function parseTextJson(text: string): Record<string, unknown> | null {
+  if (!text.startsWith(TEXT_PREFIX)) return null;
+  const jsonStr = text.slice(TEXT_PREFIX.length);
+  try {
+    return JSON.parse(jsonStr) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract MCURATOR segmentation metadata from a parsed MIDI file.
+ * Scans all tracks for MCURATOR marker and text meta events.
+ */
+export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata | null {
+  // Collect all marker/text events with absolute ticks across all tracks
+  const markerEvents: Array<{ tick: number; text: string }> = [];
+  const textEvents: Array<{ tick: number; text: string }> = [];
+
+  for (const track of midiData.tracks) {
+    let tick = 0;
+    for (const event of track) {
+      tick += event.delta;
+      if (event.type === 'marker' && event.text) {
+        markerEvents.push({ tick, text: event.text });
+      } else if (event.type === 'text' && event.text) {
+        textEvents.push({ tick, text: event.text });
+      }
+    }
+  }
+
+  // Parse file-level info from text events at tick 0
+  let fileInfo: Record<string, unknown> | undefined;
+  for (const te of textEvents) {
+    const json = parseTextJson(te.text);
+    if (json && json.type === 'file') {
+      fileInfo = json;
+      break;
+    }
+  }
+
+  // Parse segment markers
+  const segmentMap = new Map<number, McuratorSegment>();
+
+  for (const me of markerEvents) {
+    const parsed = parseMarker(me.text);
+    if (!parsed) continue;
+    segmentMap.set(me.tick, {
+      tick: me.tick,
+      index: parsed.index,
+      chord: parsed.chord,
+    });
+  }
+
+  // Merge text JSON into segments (JSON overrides marker per spec §8.3)
+  for (const te of textEvents) {
+    const json = parseTextJson(te.text);
+    if (!json || json.type === 'file') continue;
+    if (typeof json.seg !== 'number') continue;
+
+    const existing = segmentMap.get(te.tick);
+    if (existing) {
+      existing.json = json;
+      // JSON chord overrides marker chord
+      if (typeof json.chord === 'string') {
+        existing.chord = json.chord;
+      }
+    } else {
+      // Text-only segment (no marker)
+      segmentMap.set(te.tick, {
+        tick: te.tick,
+        index: json.seg as number,
+        chord: typeof json.chord === 'string' ? json.chord : null,
+        json,
+      });
+    }
+  }
+
+  if (segmentMap.size === 0 && !fileInfo) return null;
+
+  const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
+  const boundaries = segments.map(s => s.tick);
+
+  return { boundaries, segments, fileInfo };
 }

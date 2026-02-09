@@ -14,6 +14,7 @@ import {
   getNotesInTickRange,
   isMinimumDrag,
   detectChordBlocks,
+  snapForScissors,
 } from '../piano-roll';
 import type { Gesture, Harmonic } from '../../types/clip';
 
@@ -394,5 +395,61 @@ describe('detectChordBlocks', () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0].noteIndices).toHaveLength(3);
     expect(blocks[1].noteIndices).toHaveLength(3);
+  });
+});
+
+describe('snapForScissors', () => {
+  const tpb = 480; // ticks per beat
+  const onsets = [0, 480, 960, 1440];
+  const durations = [240, 240, 240, 240];
+
+  it('snaps to nearest note onset within tolerance', () => {
+    // Click near onset at 480
+    expect(snapForScissors(500, onsets, durations, tpb)).toBe(480);
+  });
+
+  it('snaps to nearest note end when no onset is close', () => {
+    // All onsets are at 0, 480, 960, 1440.
+    // Click at 260: onset 480 is 220 away (within 240 tolerance) → onset wins.
+    // To test end-snap, we need a position far from any onset but near an end.
+    // With onsets [0,480,960,1440] and durations [240,...], ends are at 240,720,1200,1680.
+    // Click at 730: closest onset is 960 (dist 230, within 240) → onset still wins.
+    // Use sparse onsets to truly isolate end-snap:
+    const sparseOnsets = [0, 1920];
+    const sparseDurations = [240, 240];
+    // Click at 250: closest onset is 0 (dist 250, outside 240 tolerance).
+    // Next onset 1920 is too far. End at 240 is dist 10 (within tolerance).
+    expect(snapForScissors(250, sparseOnsets, sparseDurations, tpb)).toBe(240);
+  });
+
+  it('falls back to beat grid when no notes nearby', () => {
+    // Use sparse onsets so no onset or end is within tolerance of 700
+    const sparseOnsets = [0, 1920];
+    const sparseDurations = [100, 100];
+    // Ends at 100, 2020. Click at 700 — no onset or end within 240 tolerance.
+    const result = snapForScissors(700, sparseOnsets, sparseDurations, tpb);
+    expect(result % tpb).toBe(0); // Should be on beat grid
+    expect(result).toBe(480); // 480 is closest beat to 700
+  });
+
+  it('returns raw tick when disableSnap is true', () => {
+    expect(snapForScissors(501.7, onsets, durations, tpb, true)).toBe(502);
+  });
+
+  it('never returns negative', () => {
+    expect(snapForScissors(-10, onsets, durations, tpb, true)).toBe(0);
+  });
+
+  it('prefers onset over end when both are close', () => {
+    // Note onset at 480, note end at 240 (from note at onset 0, dur 240)
+    // Click at 350 — onset 480 is 130 away, end 240 is 110 away
+    // But onset should take priority over end
+    // 130 < 240 (half beat) so onset is within tolerance
+    // 110 < 240 so end is also within tolerance
+    // Onset wins by priority order
+    // Actually 350 is closer to 240 (end). But onset priority means we check onsets first.
+    // Closest onset to 350 is 480 (dist 130, within 240 tolerance)
+    // So it should snap to 480
+    expect(snapForScissors(350, onsets, durations, tpb)).toBe(480);
   });
 });

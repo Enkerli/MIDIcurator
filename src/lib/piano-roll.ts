@@ -272,6 +272,59 @@ export function velocityColor(velocity: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// ─── Scissors tool: boundary snapping ──────────────────────────────────
+
+/**
+ * Snap a raw tick position for the scissors tool.
+ * Priority order:
+ *   1. Note onset within tolerance (half a beat)
+ *   2. Note end within tolerance
+ *   3. Beat grid (if no notes nearby)
+ * Shift key disables snapping entirely (caller passes `disableSnap`).
+ * Never snaps more than 1 beat away from click position.
+ */
+export function snapForScissors(
+  rawTick: number,
+  onsets: number[],
+  durations: number[],
+  ticksPerBeat: number,
+  disableSnap = false,
+): number {
+  if (disableSnap) return Math.max(0, Math.round(rawTick));
+
+  const MAX_SNAP = ticksPerBeat; // never snap more than 1 beat
+  const ONSET_TOLERANCE = ticksPerBeat / 2;
+  const END_TOLERANCE = ticksPerBeat / 2;
+
+  // 1. Find closest note onset
+  let closestOnset = Infinity;
+  let closestOnsetDist = Infinity;
+  for (const onset of onsets) {
+    const dist = Math.abs(rawTick - onset);
+    if (dist < closestOnsetDist && dist <= ONSET_TOLERANCE && dist <= MAX_SNAP) {
+      closestOnsetDist = dist;
+      closestOnset = onset;
+    }
+  }
+  if (closestOnset !== Infinity) return closestOnset;
+
+  // 2. Find closest note end
+  let closestEnd = Infinity;
+  let closestEndDist = Infinity;
+  for (let i = 0; i < onsets.length; i++) {
+    const noteEnd = onsets[i]! + durations[i]!;
+    const dist = Math.abs(rawTick - noteEnd);
+    if (dist < closestEndDist && dist <= END_TOLERANCE && dist <= MAX_SNAP) {
+      closestEndDist = dist;
+      closestEnd = noteEnd;
+    }
+  }
+  if (closestEnd !== Infinity) return closestEnd;
+
+  // 3. Fall back to beat grid
+  return Math.max(0, Math.round(rawTick / ticksPerBeat) * ticksPerBeat);
+}
+
 // ─── Block chord detection ─────────────────────────────────────────────
 
 /** A group of notes that start and end together (block chord). */

@@ -378,3 +378,102 @@ export function detectChordsPerBar(
 export function detectOverallChord(pitches: number[]): ChordMatch | null {
   return detectChord(pitches);
 }
+
+// ─── Segment-aware chord detection ─────────────────────────────────────
+
+/** Per-segment chord result (raw, before conversion to DetectedChord). */
+export interface SegmentChord {
+  index: number;
+  startTick: number;
+  endTick: number;
+  chord: ChordMatch | null;
+  pitchClasses: number[];
+}
+
+/**
+ * Detect chords per segment, where segments are defined by boundary tick positions.
+ * Segments are: [0…b1), [b1…b2), …, [bn…clipEnd].
+ *
+ * A note is attributed to a segment if:
+ *   1. Its onset falls within [start, end), OR
+ *   2. It started before `start` but is still sounding (onset + duration > start).
+ *
+ * Uses the same merge-first strategy as detectChordsPerBar.
+ */
+export function detectChordsForSegments(
+  pitches: number[],
+  onsets: number[],
+  durations: number[],
+  boundaries: number[],
+  clipEndTick: number,
+): SegmentChord[] {
+  if (boundaries.length === 0) return [];
+
+  // Build segment ranges: [0…b1), [b1…b2), …, [bn…clipEnd]
+  const ranges: Array<{ start: number; end: number }> = [];
+  const sorted = [...boundaries].sort((a, b) => a - b);
+
+  // First segment: 0 to first boundary
+  if (sorted[0]! > 0) {
+    ranges.push({ start: 0, end: sorted[0]! });
+  }
+
+  // Middle segments
+  for (let i = 0; i < sorted.length - 1; i++) {
+    ranges.push({ start: sorted[i]!, end: sorted[i + 1]! });
+  }
+
+  // Last segment: last boundary to clip end
+  const lastBoundary = sorted[sorted.length - 1]!;
+  if (lastBoundary < clipEndTick) {
+    ranges.push({ start: lastBoundary, end: clipEndTick });
+  }
+
+  const results: SegmentChord[] = [];
+  let prevChord: ChordMatch | null = null;
+
+  for (let segIdx = 0; segIdx < ranges.length; segIdx++) {
+    const { start, end } = ranges[segIdx]!;
+
+    // Collect notes that are sounding in this segment:
+    //   onset in [start, end)  OR  onset < start AND onset+duration > start
+    const segPitches: number[] = [];
+    for (let i = 0; i < onsets.length; i++) {
+      const onset = onsets[i]!;
+      const dur = durations[i]!;
+      const noteEnd = onset + dur;
+
+      if ((onset >= start && onset < end) ||
+          (onset < start && noteEnd > start)) {
+        segPitches.push(pitches[i]!);
+      }
+    }
+
+    const pcs = [...new Set(segPitches.map(p => ((p % 12) + 12) % 12))].sort((a, b) => a - b);
+
+    // Detect chord using merge-first strategy
+    let chord: ChordMatch | null = null;
+    if (segPitches.length >= 2) {
+      chord = detectChord(segPitches);
+    }
+
+    // Resonance: empty segment inherits previous chord
+    if (chord === null && segPitches.length === 0 && prevChord !== null) {
+      chord = prevChord;
+    }
+
+    if (chord !== null) {
+      prevChord = chord;
+    }
+
+    results.push({
+      index: segIdx,
+      startTick: start,
+      endTick: end,
+      chord,
+      pitchClasses: pcs,
+    });
+  }
+
+  return results;
+}
