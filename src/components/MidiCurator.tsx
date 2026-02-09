@@ -708,6 +708,7 @@ export function MidiCurator() {
             onAddBoundary={addBoundary}
             onRemoveBoundary={removeBoundary}
             onMoveBoundary={moveBoundary}
+            onFilterByTag={setFilterTag}
           />
         ) : (
           <div className="mc-main">

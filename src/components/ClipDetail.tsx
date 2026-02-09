@@ -51,6 +51,7 @@ interface ClipDetailProps {
   onAddBoundary: (tick: number) => void;
   onRemoveBoundary: (tick: number) => void;
   onMoveBoundary: (fromTick: number, toTick: number) => void;
+  onFilterByTag?: (tag: string) => void;
 }
 
 export function ClipDetail({
@@ -87,6 +88,7 @@ export function ClipDetail({
   onAddBoundary,
   onRemoveBoundary,
   onMoveBoundary,
+  onFilterByTag,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -217,6 +219,7 @@ export function ClipDetail({
         newTag={newTag}
         onNewTagChange={onNewTagChange}
         onAddTag={onAddTag}
+        onTagClick={onFilterByTag}
       />
 
       <TransformControls

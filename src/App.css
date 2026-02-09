@@ -363,6 +363,15 @@ body {
   font-size: 12px;
 }
 
+.mc-tag--clickable {
+  cursor: pointer;
+}
+
+.mc-tag--clickable:hover {
+  background: var(--mc-accent);
+  color: var(--mc-bg);
+}
+
 .mc-tag-input-row {
   display: flex;
   gap: 8px;
