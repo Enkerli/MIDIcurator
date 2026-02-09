@@ -17,7 +17,7 @@ import { ClipDetail } from './ClipDetail';
 import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
 
 export function MidiCurator() {
-  const { db, clips, refreshClips } = useDatabase();
+  const { db, clips, tagIndex, refreshClips } = useDatabase();
   const { playbackState, currentTime, play, pause, stop, toggle } = usePlayback();
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -468,12 +468,15 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, selectionRange, refreshClips]);
 
-  const filteredClips = useMemo(() =>
-    filterTag
-      ? clips.filter(c => c.filename.toLowerCase().includes(filterTag.toLowerCase()))
-      : clips,
-    [clips, filterTag],
-  );
+  const filteredClips = useMemo(() => {
+    if (!filterTag) return clips;
+    const q = filterTag.toLowerCase();
+    return clips.filter(c => {
+      if (c.filename.toLowerCase().includes(q)) return true;
+      const clipTags = tagIndex.get(c.id);
+      return clipTags?.some(t => t.toLowerCase().includes(q)) ?? false;
+    });
+  }, [clips, filterTag, tagIndex]);
 
   // Escape key clears range selection or exits scissors mode
   useEffect(() => {

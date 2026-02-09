@@ -131,4 +131,22 @@ export class MidiDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  /** Get all tags grouped by clip ID. */
+  async getAllTagsByClip(): Promise<Map<string, string[]>> {
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['tags'], 'readonly');
+      const store = tx.objectStore('tags');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const map = new Map<string, string[]>();
+        for (const rec of request.result as Array<{ clipId: string; tag: string }>) {
+          if (!map.has(rec.clipId)) map.set(rec.clipId, []);
+          map.get(rec.clipId)!.push(rec.tag);
+        }
+        resolve(map);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
