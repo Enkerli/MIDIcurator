@@ -457,14 +457,10 @@ export function detectChordsForSegments(
       chord = detectChord(segPitches);
     }
 
-    // Resonance: empty segment inherits previous chord
-    if (chord === null && segPitches.length === 0 && prevChord !== null) {
-      chord = prevChord;
-    }
-
-    if (chord !== null) {
-      prevChord = chord;
-    }
+    // No resonance for explicit segments — if a user-placed boundary
+    // creates an empty segment, it should display as empty ("–"), not
+    // inherit the previous chord.  Resonance remains in detectChordsPerBar
+    // where empty bars are a grid artifact, not user intent.
 
     results.push({
       index: segIdx,

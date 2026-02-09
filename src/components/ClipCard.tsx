@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import type { Clip } from '../types/clip';
 
 interface ClipCardProps {
@@ -7,7 +8,15 @@ interface ClipCardProps {
 }
 
 export function ClipCard({ clip, isSelected, onClick }: ClipCardProps) {
+  const ref = useRef<HTMLDivElement>(null);
   const densityMatch = clip.notes?.match(/density: ([\d.]+)x/);
+
+  // Scroll into view when selected (e.g. via arrow key navigation)
+  useEffect(() => {
+    if (isSelected && ref.current) {
+      ref.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isSelected]);
 
   // Format chord or pitch class set for display
   const chordDisplay = clip.harmonic.detectedChord
@@ -18,6 +27,7 @@ export function ClipCard({ clip, isSelected, onClick }: ClipCardProps) {
 
   return (
     <div
+      ref={ref}
       className={`mc-clip-card ${isSelected ? 'mc-clip-card--selected' : ''}`}
       onClick={onClick}
     >

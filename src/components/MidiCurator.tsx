@@ -194,6 +194,16 @@ export function MidiCurator() {
         };
 
         await db.addClip(clip);
+
+        // Auto-tag: clips with ≤5 distinct pitch classes likely contain
+        // a single chord.  Tag with "single-chord" and the chord symbol.
+        const uniquePcs = new Set(harmonic.pitchClasses);
+        if (uniquePcs.size <= 5 && uniquePcs.size >= 2) {
+          await db.addTag(clip.id, 'single-chord');
+          if (harmonic.detectedChord?.symbol) {
+            await db.addTag(clip.id, harmonic.detectedChord.symbol);
+          }
+        }
       } catch (error) {
         console.error('Error importing', file.name, error);
       }
@@ -458,6 +468,13 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, selectionRange, refreshClips]);
 
+  const filteredClips = useMemo(() =>
+    filterTag
+      ? clips.filter(c => c.filename.toLowerCase().includes(filterTag.toLowerCase()))
+      : clips,
+    [clips, filterTag],
+  );
+
   // Escape key clears range selection or exits scissors mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -500,6 +517,60 @@ export function MidiCurator() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedClip]);
+
+  // Arrow key navigation: Up/Down for clips, Left/Right for segments
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.matches('input, textarea')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const isUpDown = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+      const isLeftRight = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      if (!isUpDown && !isLeftRight) return;
+
+      e.preventDefault();
+
+      // Up/Down: navigate clips in the filtered list
+      if (isUpDown && filteredClips.length > 0) {
+        const currentIdx = selectedClip
+          ? filteredClips.findIndex(c => c.id === selectedClip.id)
+          : -1;
+        let nextIdx: number;
+        if (e.key === 'ArrowDown') {
+          nextIdx = currentIdx < filteredClips.length - 1 ? currentIdx + 1 : 0;
+        } else {
+          nextIdx = currentIdx > 0 ? currentIdx - 1 : filteredClips.length - 1;
+        }
+        selectClip(filteredClips[nextIdx]!);
+        return;
+      }
+
+      // Left/Right: navigate segments in the current clip
+      if (isLeftRight && selectedClip?.segmentation?.segmentChords) {
+        const segs = selectedClip.segmentation.segmentChords;
+        if (segs.length === 0) return;
+
+        // Find current segment based on selection range
+        let currentSegIdx = -1;
+        if (selectionRange) {
+          currentSegIdx = segs.findIndex(
+            s => s.startTick === selectionRange.startTick && s.endTick === selectionRange.endTick,
+          );
+        }
+
+        let nextSegIdx: number;
+        if (e.key === 'ArrowRight') {
+          nextSegIdx = currentSegIdx < segs.length - 1 ? currentSegIdx + 1 : 0;
+        } else {
+          nextSegIdx = currentSegIdx > 0 ? currentSegIdx - 1 : segs.length - 1;
+        }
+        const seg = segs[nextSegIdx]!;
+        setSelectionRange({ startTick: seg.startTick, endTick: seg.endTick });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filteredClips, selectedClip, selectionRange, selectClip]);
 
   // ─── Segmentation boundary management ──────────────────────────────
 
@@ -586,10 +657,6 @@ export function MidiCurator() {
         }
       : {},
   );
-
-  const filteredClips = filterTag
-    ? clips.filter(c => c.filename.toLowerCase().includes(filterTag.toLowerCase()))
-    : clips;
 
   return (
     <div className="mc-app">
