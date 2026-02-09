@@ -1,6 +1,6 @@
 # MIDIcurator — Roadmap & Prioritized Next Steps
 
-*Updated 2026-02-09. Previous segmentation plan (Phases A–D) is complete.*
+*Updated 2026-02-10. Previous segmentation plan (Phases A–D) is complete.*
 
 ---
 
@@ -20,73 +20,47 @@ All phases shipped in commit `ad2f711`:
 
 ## Prioritized Next Steps
 
-### Tier 1 — Quick Wins (low effort, high value)
+### Tier 1 — Quick Wins ✅ Done
 
-#### 1.1 Empty segments display "–" instead of inherited chord
-**Status**: Bug fix
-**Effort**: ~30 min
-**Files**: `src/components/ChordBar.tsx`, possibly `src/lib/chord-detect.ts`
-
-Empty segments (no note onsets within their range) currently show a chord
-inherited via resonance. When a segment has been *explicitly created* by
-the scissors tool and contains no notes, it should display "–" (empty).
-
-The resonance principle should remain for *bar-level* detection but not
-for explicitly segmented regions. The fix is likely in
-`detectChordsForSegments()` — don't apply resonance when the segment has
-an explicit boundary, or have ChordBar distinguish "inherited" from
-"detected" chords.
-
-#### 1.2 Keyboard navigation: arrow keys for clips & segments
-**Status**: New feature
-**Effort**: ~1–2h
-**Files**: `src/components/MidiCurator.tsx`, `src/components/Sidebar.tsx`
-
-- **Up/Down arrows**: navigate between clips in the sidebar list
-- **Left/Right arrows** (or Tab/Shift-Tab): navigate between segments in
-  the current clip (when segmentation exists)
-- Follows standard list navigation conventions
-- Arrows only active when no input is focused
-
-#### 1.3 Auto-tag single-chord clips
-**Status**: New feature
-**Effort**: ~1–2h
-**Files**: `src/components/MidiCurator.tsx` or new `src/lib/auto-tag.ts`
-
-Heuristic: if a clip has ≤5 distinct pitch classes, tag it as
-"single-chord" (or with the chord symbol itself). This enables:
-- bulk filtering in the sidebar
-- quick visual scan of which clips are harmonically simple
-- verification workflow: group single-chord clips, user confirms labels
+All shipped in commits `e1c6e70`, `d41a2bc`, `641fbe6`:
+- **1.1** Empty segments display "–" — removed resonance from
+  `detectChordsForSegments()` for explicitly segmented clips
+- **1.2** Keyboard navigation — Up/Down for clips, Left/Right for segments
+- **1.3** Auto-tag single-chord clips — clips with ≤5 PCs get
+  "single-chord" + chord symbol tags on import
+- **1.4** Clickable tags — click a tag to filter the clip list
+- **1.5** Tag-aware search — filter searches both filenames and tags
 
 ---
 
 ### Tier 2 — Medium Effort, High Value
 
 #### 2.1 Dual ChordBar: "realized" + "underlying" (competence/performance)
-**Status**: New feature (significant)
-**Effort**: ~4–6h
-**Files**: New `src/components/LeadsheetBar.tsx`, `src/types/clip.ts`,
-  `src/components/ClipDetail.tsx`
+**Status**: Spec complete → ready to implement
+**Effort**: ~4.5h
+**Spec**: [`docs/SPEC-LEADSHEET-BAR.md`](docs/SPEC-LEADSHEET-BAR.md)
+**Files**: New `src/lib/leadsheet-parser.ts`,
+  `src/components/LeadsheetBar.tsx`, `src/types/clip.ts`,
+  `src/components/ClipDetail.tsx`, `src/lib/midi-export.ts`,
+  `src/lib/midi-parser.ts`
 
 Two layers of harmonic annotation:
 
-1. **Realized** (current ChordBar): shows what's actually played, in
-   MIDI-time proportional segments. Already implemented.
+1. **Realized** (current ChordBar): what's actually played, MIDI-time
+   proportional. Already implemented.
 
-2. **Underlying** (new "leadsheet" bar): bar-quantized chord symbols
-   entered manually, like a lead sheet. Format:
-   `Fm7 | Am7 D7 | Abm7 Db7 | Bbm7 Eb7 |`
+2. **Underlying** (new LeadsheetBar): bar-quantized chord symbols
+   entered manually via pipe-delimited text:
+   `Fm7 | Am7 D7 | Abm7 Db7 | Bbm7 Eb7`
 
-   Rules:
-   - All chords within a bar have equal duration (halves if 2, thirds if 3)
-   - A chord can be repeated across bars to make duration explicit
-   - Input via text field or click-to-set per bar
+   Conventions (iReal Pro–inspired):
+   - `|` bar delimiter, space-separated chords (equal time division)
+   - `%` or `-` repeat previous bar, `NC` no chord
+   - All 104 chord qualities supported via existing `parseChordSymbol()`
+   - Slash bass (`Am7/G`) deferred to v2
 
-This second layer informs:
-- identification of extensions vs NCTs (non-chord tones)
-- functional analysis (future: Roman numerals relative to underlying key)
-- comparison between intended harmony and actual realization
+Implementation order: types → parser + tests → component → integration
+→ CSS → MIDI round-trip. See spec for full details.
 
 #### 2.2 Enharmonic spelling by chord role
 **Status**: Known issue / research
@@ -182,6 +156,19 @@ Sources:
 **Implication**: MCURATOR's MIDI metadata approach (marker + JSON text
 events) is already more expressive than Apple's format for chord
 annotation. No need to emulate Apple Loops' metadata scheme.
+
+### Leadsheet chord input formats
+**Finding**: Surveyed iReal Pro, ChordPro, MusicXML, Band-in-a-Box, and
+Nashville Number System. The consensus format for compact chord charts
+is pipe-delimited bars with space-separated chords (equal time division),
+`%` for repeat, `NC` for no-chord. This matches iReal Pro conventions
+and is widely understood by musicians.
+
+The existing `parseChordSymbol()` handles root + quality for all 104
+dictionary entries. Only `/Bass` notation (slash chords) is missing
+and deferred.
+
+Full spec: [`docs/SPEC-LEADSHEET-BAR.md`](docs/SPEC-LEADSHEET-BAR.md)
 
 ---
 
