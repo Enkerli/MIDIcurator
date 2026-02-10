@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import type { Clip, DetectedChord, Segmentation, SegmentChordInfo } from '../types/clip';
+import type { Clip, DetectedChord, Leadsheet, Segmentation, SegmentChordInfo } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
@@ -12,6 +12,7 @@ import type { TickRange } from '../lib/piano-roll';
 import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
 import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
 import { substituteSegmentPitches } from '../lib/chord-substitute';
+import { parseLeadsheet } from '../lib/leadsheet-parser';
 import { Sidebar } from './Sidebar';
 import { ClipDetail } from './ClipDetail';
 import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
@@ -181,6 +182,12 @@ export function MidiCurator() {
           segmentation = { boundaries: mcurator.boundaries, segmentChords };
         }
 
+        // Restore leadsheet from MCURATOR metadata (if present)
+        let leadsheet: Leadsheet | undefined;
+        if (mcurator?.leadsheetText) {
+          leadsheet = parseLeadsheet(mcurator.leadsheetText, gesture.num_bars);
+        }
+
         const clip: Clip = {
           id: crypto.randomUUID(),
           filename: file.name,
@@ -191,6 +198,7 @@ export function MidiCurator() {
           rating: null,
           notes: '',
           segmentation,
+          leadsheet,
         };
 
         await db.addClip(clip);
@@ -468,6 +476,24 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, selectionRange, refreshClips]);
 
+  // ─── Leadsheet (underlying chords) ──────────────────────────────
+  const handleLeadsheetChange = useCallback(async (inputText: string) => {
+    if (!selectedClip || !db) return;
+    if (inputText === '') {
+      // Clear leadsheet
+      const updated: Clip = { ...selectedClip, leadsheet: undefined };
+      await db.updateClip(updated);
+      setSelectedClip(updated);
+      refreshClips();
+      return;
+    }
+    const leadsheet = parseLeadsheet(inputText, selectedClip.gesture.num_bars);
+    const updated: Clip = { ...selectedClip, leadsheet };
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    refreshClips();
+  }, [selectedClip, db, refreshClips]);
+
   const filteredClips = useMemo(() => {
     if (!filterTag) return clips;
     const q = filterTag.toLowerCase();
@@ -712,6 +738,7 @@ export function MidiCurator() {
             onRemoveBoundary={removeBoundary}
             onMoveBoundary={moveBoundary}
             onFilterByTag={setFilterTag}
+            onLeadsheetChange={handleLeadsheetChange}
           />
         ) : (
           <div className="mc-main">

@@ -1,4 +1,4 @@
-import type { Gesture, Harmonic, Clip, Segmentation, BarChordInfo } from '../types/clip';
+import type { Gesture, Harmonic, Clip, Segmentation, BarChordInfo, Leadsheet } from '../types/clip';
 import { createZip } from './zip';
 
 export function encodeVariableLength(value: number): number[] {
@@ -75,6 +75,7 @@ function buildMetadataEvents(
   segmentation: Segmentation | undefined,
   barChords: BarChordInfo[] | undefined,
   ticksPerBeat: number,
+  leadsheet?: Leadsheet,
 ): Array<{ tick: number; data: number[] }> {
   const metaEvents: Array<{ tick: number; data: number[] }> = [];
 
@@ -88,6 +89,16 @@ function buildMetadataEvents(
     ppq: ticksPerBeat,
   });
   metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${fileJson}`) });
+
+  // Leadsheet text event at tick 0 (if present)
+  if (leadsheet && leadsheet.inputText) {
+    const lsJson = JSON.stringify({
+      type: 'leadsheet',
+      text: leadsheet.inputText,
+      bars: leadsheet.bars.length,
+    });
+    metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${lsJson}`) });
+  }
 
   if (!segmentation || segmentation.boundaries.length === 0) return metaEvents;
 
@@ -129,6 +140,7 @@ export function createMIDITrack(
   _ticksPerBeat: number,
   segmentation?: Segmentation,
   barChords?: BarChordInfo[],
+  leadsheet?: Leadsheet,
 ): number[] {
   // All events as absolute-tick entries, converted to delta at the end
   const allEvents: Array<{ tick: number; data: number[] }> = [];
@@ -146,7 +158,7 @@ export function createMIDITrack(
   });
 
   // MCURATOR metadata events
-  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat);
+  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat, leadsheet);
   allEvents.push(...metaEvents);
 
   // Note events
@@ -203,10 +215,11 @@ export function createMIDI(
   harmonic: Harmonic,
   bpm: number,
   segmentation?: Segmentation,
+  leadsheet?: Leadsheet,
 ): Uint8Array {
   const ticksPerBeat = gesture.ticks_per_beat || 480;
   const header = createMIDIHeader(1, ticksPerBeat);
-  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords);
+  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords, leadsheet);
 
   return new Uint8Array([...header, ...track]);
 }
@@ -214,7 +227,7 @@ export function createMIDI(
 // DOM-dependent download helpers (future Electron IPC boundary)
 
 export function downloadMIDI(clip: Clip): void {
-  const midiData = createMIDI(clip.gesture, clip.harmonic, clip.bpm, clip.segmentation);
+  const midiData = createMIDI(clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet);
   const blob = new Blob([midiData], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
 

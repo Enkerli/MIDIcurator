@@ -5,6 +5,8 @@ import type { TickRange } from '../lib/piano-roll';
 import { StatsGrid } from './StatsGrid';
 import { PianoRoll } from './PianoRoll';
 import { ChordBar } from './ChordBar';
+import { LeadsheetBar } from './LeadsheetBar';
+import { LeadsheetInput } from './LeadsheetInput';
 import { TransportBar } from './TransportBar';
 import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
@@ -52,6 +54,7 @@ interface ClipDetailProps {
   onRemoveBoundary: (tick: number) => void;
   onMoveBoundary: (fromTick: number, toTick: number) => void;
   onFilterByTag?: (tag: string) => void;
+  onLeadsheetChange?: (inputText: string) => void;
 }
 
 export function ClipDetail({
@@ -89,6 +92,7 @@ export function ClipDetail({
   onRemoveBoundary,
   onMoveBoundary,
   onFilterByTag,
+  onLeadsheetChange,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -139,6 +143,24 @@ export function ClipDetail({
             ✂
           </button>
         </div>
+        {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
+          <>
+          <LeadsheetInput
+            value={clip.leadsheet?.inputText ?? ''}
+            numBars={clip.gesture.num_bars}
+            onSubmit={onLeadsheetChange ?? (() => {})}
+            harmonic={clip.harmonic}
+          />
+          {clip.leadsheet && clip.leadsheet.bars.length > 0 && (
+            <LeadsheetBar
+              leadsheet={clip.leadsheet}
+              ticksPerBar={clip.gesture.ticks_per_bar}
+              totalTicks={totalTicks}
+              numBars={clip.gesture.num_bars}
+            />
+          )}
+          </>
+        )}
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
           <ChordBar
             barChords={clip.harmonic.barChords}

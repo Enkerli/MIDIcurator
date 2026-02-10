@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createMIDI, encodeTextMeta, encodeVariableLength } from '../midi-export';
 import { parseMIDI, extractMcuratorSegments } from '../midi-parser';
-import type { Gesture, Harmonic, Segmentation } from '../../types/clip';
+import { parseLeadsheet } from '../leadsheet-parser';
+import type { Gesture, Harmonic, Leadsheet, Segmentation } from '../../types/clip';
 
 function makeGesture(overrides?: Partial<Gesture>): Gesture {
   return {
@@ -157,6 +158,47 @@ describe('marker-only parsing', () => {
 
     const markerTexts = markers.map(m => m.text!);
     expect(markerTexts.some(t => t.includes('MCURATOR v1 SEG'))).toBe(true);
+  });
+});
+
+describe('leadsheet round-trip', () => {
+  it('round-trips leadsheet text through export and re-import', () => {
+    const gesture = makeGesture({ num_bars: 4, ticks_per_bar: 1920 });
+    const harmonic = makeHarmonic();
+    const leadsheet: Leadsheet = parseLeadsheet('Cm7 | Fm7 | G7 | Cm7', 4);
+
+    const midi = createMIDI(gesture, harmonic, 120, undefined, leadsheet);
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta).not.toBeNull();
+    expect(meta!.leadsheetText).toBe('Cm7 | Fm7 | G7 | Cm7');
+  });
+
+  it('preserves leadsheet alongside segmentation', () => {
+    const gesture = makeGesture({ num_bars: 2, ticks_per_bar: 1920 });
+    const harmonic = makeHarmonic();
+    const segmentation: Segmentation = { boundaries: [960] };
+    const leadsheet: Leadsheet = parseLeadsheet('Am7 D7 | Gmaj7', 2);
+
+    const midi = createMIDI(gesture, harmonic, 120, segmentation, leadsheet);
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta).not.toBeNull();
+    expect(meta!.boundaries).toEqual([960]);
+    expect(meta!.leadsheetText).toBe('Am7 D7 | Gmaj7');
+  });
+
+  it('returns undefined leadsheetText when no leadsheet embedded', () => {
+    const gesture = makeGesture();
+    const harmonic = makeHarmonic();
+
+    const midi = createMIDI(gesture, harmonic, 120);
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta!.leadsheetText).toBeUndefined();
   });
 });
 

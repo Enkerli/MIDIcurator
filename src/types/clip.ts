@@ -98,6 +98,36 @@ export interface Segmentation {
   segmentChords?: SegmentChordInfo[];
 }
 
+/** A single chord in the leadsheet layer, bar-quantized. */
+export interface LeadsheetChord {
+  /** Parsed chord, or null for NC */
+  chord: DetectedChord | null;
+  /** Original input text (preserved for round-trip fidelity) */
+  inputText: string;
+  /** Position within bar: 0 = first chord, 1 = second, etc. */
+  position: number;
+  /** Total chords in this bar (determines time fraction: 1/total) */
+  totalInBar: number;
+}
+
+/** Per-bar leadsheet annotation. */
+export interface LeadsheetBar {
+  /** Bar index (0-based, matching BarChordInfo.bar) */
+  bar: number;
+  /** Chords in this bar (1–4 entries, equal time division) */
+  chords: LeadsheetChord[];
+  /** True if this bar is a repeat of the previous bar (from '%' or '-') */
+  isRepeat: boolean;
+}
+
+/** Full leadsheet annotation for a clip. */
+export interface Leadsheet {
+  /** Raw input text (for editing round-trip) */
+  inputText: string;
+  /** Parsed per-bar data */
+  bars: LeadsheetBar[];
+}
+
 /** A clip stored in IndexedDB. */
 export interface Clip {
   id: string;
@@ -110,6 +140,8 @@ export interface Clip {
   notes: string;
   source?: string;
   segmentation?: Segmentation;
+  /** Leadsheet (underlying chord) annotation, manually entered. */
+  leadsheet?: Leadsheet;
 }
 
 /** A tag record in the 'tags' object store. */

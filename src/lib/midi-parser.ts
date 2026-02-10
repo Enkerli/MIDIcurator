@@ -231,6 +231,8 @@ export interface McuratorMetadata {
   boundaries: number[];
   segments: McuratorSegment[];
   fileInfo?: Record<string, unknown>;
+  /** Raw leadsheet input text (if embedded in MIDI metadata). */
+  leadsheetText?: string;
 }
 
 const MARKER_PREFIX = 'MCURATOR v1 SEG';
@@ -290,13 +292,16 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
     }
   }
 
-  // Parse file-level info from text events at tick 0
+  // Parse file-level info and leadsheet from text events at tick 0
   let fileInfo: Record<string, unknown> | undefined;
+  let leadsheetText: string | undefined;
   for (const te of textEvents) {
     const json = parseTextJson(te.text);
-    if (json && json.type === 'file') {
+    if (!json) continue;
+    if (json.type === 'file') {
       fileInfo = json;
-      break;
+    } else if (json.type === 'leadsheet' && typeof json.text === 'string') {
+      leadsheetText = json.text;
     }
   }
 
@@ -337,10 +342,10 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
     }
   }
 
-  if (segmentMap.size === 0 && !fileInfo) return null;
+  if (segmentMap.size === 0 && !fileInfo && !leadsheetText) return null;
 
   const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
   const boundaries = segments.map(s => s.tick);
 
-  return { boundaries, segments, fileInfo };
+  return { boundaries, segments, fileInfo, leadsheetText };
 }

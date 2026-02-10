@@ -931,3 +931,103 @@ body {
 .mc-chord-bar-symbol--has-extras {
   border-bottom: 2px dotted var(--mc-accent);
 }
+
+/* ─── Leadsheet bar (underlying chords) ─────────────────────────── */
+
+.mc-leadsheet-bar {
+  display: flex;
+  margin-left: 40px; /* Align with piano roll (matches labelWidth) */
+  border: 1px solid var(--mc-border);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+  background: var(--mc-bg-raised);
+}
+
+.mc-leadsheet-cell {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 3px 6px;
+  border-right: 1px solid var(--mc-border);
+  min-height: 22px;
+}
+
+.mc-leadsheet-cell:last-child {
+  border-right: none;
+}
+
+.mc-leadsheet-chord {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mc-green-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  display: inline-block;
+}
+
+.mc-leadsheet-chord--nc,
+.mc-leadsheet-chord--repeat {
+  color: var(--mc-text-dim);
+  font-weight: 400;
+  font-style: italic;
+}
+
+.mc-leadsheet-cell--nc,
+.mc-leadsheet-cell--repeat {
+  opacity: 0.6;
+}
+
+.mc-leadsheet-chord--invalid {
+  color: #c44;
+  text-decoration: underline wavy;
+}
+
+/* Leadsheet input row */
+.mc-leadsheet-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 40px;
+  margin-bottom: 4px;
+}
+
+.mc-leadsheet-input-label {
+  font-size: 11px;
+  color: var(--mc-text-muted);
+  flex-shrink: 0;
+}
+
+.mc-leadsheet-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--mc-border);
+  border-radius: 3px;
+  background: var(--mc-bg);
+  color: var(--mc-text);
+}
+
+.mc-leadsheet-input:focus {
+  outline: none;
+  border-color: var(--mc-accent);
+}
+
+.mc-leadsheet-input::placeholder {
+  color: var(--mc-text-dim);
+  font-style: italic;
+}
+
+.mc-leadsheet-edit-btn,
+.mc-leadsheet-copy-btn {
+  font-size: 11px;
+}
+
+/* When leadsheet bar is present, connect it visually to chord bar below */
+.mc-leadsheet-bar + .mc-chord-bar {
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+}
