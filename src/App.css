@@ -587,6 +587,41 @@ body {
   margin-bottom: 10px;
 }
 
+.mc-btn--samples {
+  margin-top: 20px;
+  padding: 10px 24px;
+  background: var(--mc-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.mc-btn--samples:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mc-btn--load-samples {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--mc-bg-card);
+  border: 1px dashed var(--mc-border);
+  border-radius: 6px;
+  color: var(--mc-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.mc-btn--load-samples:hover {
+  border-color: var(--mc-accent);
+  color: var(--mc-accent);
+}
+.mc-btn--load-samples:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Keyboard shortcuts bar */
 .mc-shortcuts-bar {
   padding: 10px 20px;

@@ -494,6 +494,32 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, refreshClips]);
 
+  const [loadingSamples, setLoadingSamples] = useState(false);
+
+  const handleLoadSamples = useCallback(async () => {
+    if (!db || loadingSamples) return;
+    setLoadingSamples(true);
+    try {
+      const base = import.meta.env.BASE_URL;
+      const res = await fetch(`${base}samples/manifest.json`);
+      if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status}`);
+      const manifest: Array<{ filename: string }> = await res.json();
+
+      for (const entry of manifest) {
+        const midiRes = await fetch(`${base}samples/${entry.filename}`);
+        if (!midiRes.ok) continue;
+        const arrayBuffer = await midiRes.arrayBuffer();
+        // Create a File object so the existing pipeline can handle it
+        const file = new File([arrayBuffer], entry.filename, { type: 'audio/midi' });
+        await handleFileUpload([file]);
+      }
+    } catch (error) {
+      console.error('Error loading samples:', error);
+    } finally {
+      setLoadingSamples(false);
+    }
+  }, [db, loadingSamples, handleFileUpload]);
+
   const filteredClips = useMemo(() => {
     if (!filterTag) return clips;
     const q = filterTag.toLowerCase();
@@ -700,6 +726,8 @@ export function MidiCurator() {
           onClearAll={clearAllClips}
           onFilesDropped={handleFileUpload}
           fileInputRef={fileInputRef}
+          onLoadSamples={handleLoadSamples}
+          loadingSamples={loadingSamples}
         />
 
         {selectedClip ? (
@@ -745,6 +773,15 @@ export function MidiCurator() {
             <div className="mc-welcome">
               <h2>Welcome to MIDI Curator</h2>
               <p>Drop MIDI files to get started, or select a clip from the sidebar.</p>
+              {clips.length === 0 && (
+                <button
+                  className="mc-btn--samples"
+                  onClick={handleLoadSamples}
+                  disabled={loadingSamples}
+                >
+                  {loadingSamples ? 'Loading...' : 'Load Sample Progressions'}
+                </button>
+              )}
             </div>
           </div>
         )}

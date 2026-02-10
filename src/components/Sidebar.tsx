@@ -14,6 +14,8 @@ interface SidebarProps {
   onClearAll: () => void;
   onFilesDropped: (files: File[]) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
+  onLoadSamples?: () => void;
+  loadingSamples?: boolean;
 }
 
 export function Sidebar({
@@ -26,6 +28,8 @@ export function Sidebar({
   onClearAll,
   onFilesDropped,
   fileInputRef,
+  onLoadSamples,
+  loadingSamples,
 }: SidebarProps) {
   return (
     <div className="mc-sidebar">
@@ -35,6 +39,16 @@ export function Sidebar({
       </div>
 
       <DropZone onFilesDropped={onFilesDropped} fileInputRef={fileInputRef} />
+
+      {onLoadSamples && clips.length === 0 && (
+        <button
+          className="mc-btn--load-samples"
+          onClick={onLoadSamples}
+          disabled={loadingSamples}
+        >
+          {loadingSamples ? 'Loading samples...' : 'Load sample progressions'}
+        </button>
+      )}
 
       <input
         type="text"
