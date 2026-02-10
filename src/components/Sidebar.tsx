@@ -1,8 +1,10 @@
 import type { RefObject } from 'react';
 import type { Clip } from '../types/clip';
+import type { VoicingShape } from '../lib/progressions';
 import { DropZone } from './DropZone';
 import { ClipCard } from './ClipCard';
 import { ThemeToggle } from './ThemeToggle';
+import { ProgressionGenerator } from './ProgressionGenerator';
 
 interface SidebarProps {
   clips: Clip[];
@@ -16,6 +18,7 @@ interface SidebarProps {
   fileInputRef: RefObject<HTMLInputElement | null>;
   onLoadSamples?: () => void;
   loadingSamples?: boolean;
+  onGenerateProgression?: (progressionIndex: number, keyOffset: number, voicing: VoicingShape) => void;
 }
 
 export function Sidebar({
@@ -30,6 +33,7 @@ export function Sidebar({
   fileInputRef,
   onLoadSamples,
   loadingSamples,
+  onGenerateProgression,
 }: SidebarProps) {
   return (
     <div className="mc-sidebar">
@@ -39,6 +43,10 @@ export function Sidebar({
       </div>
 
       <DropZone onFilesDropped={onFilesDropped} fileInputRef={fileInputRef} />
+
+      {onGenerateProgression && (
+        <ProgressionGenerator onGenerate={onGenerateProgression} />
+      )}
 
       {onLoadSamples && clips.length === 0 && (
         <button

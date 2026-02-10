@@ -19,7 +19,7 @@ export function encodeVariableLength(value: number): number[] {
  * @param metaType 0x01 for text, 0x06 for marker
  * @param text UTF-8 string content
  */
-export function encodeTextMeta(metaType: 0x01 | 0x06, text: string): number[] {
+export function encodeTextMeta(metaType: 0x01 | 0x03 | 0x06, text: string): number[] {
   const textBytes = new TextEncoder().encode(text);
   return [0xFF, metaType, ...encodeVariableLength(textBytes.length), ...textBytes];
 }
@@ -76,18 +76,29 @@ function buildMetadataEvents(
   barChords: BarChordInfo[] | undefined,
   ticksPerBeat: number,
   leadsheet?: Leadsheet,
+  title?: string,
+  variantOf?: string,
+  clipNotes?: string,
 ): Array<{ tick: number; data: number[] }> {
   const metaEvents: Array<{ tick: number; data: number[] }> = [];
 
+  // MIDI Sequence/Track Name (meta type 0x03) — visible in DAWs
+  if (title) {
+    metaEvents.push({ tick: 0, data: encodeTextMeta(0x03, title) });
+  }
+
   // File-level text event at tick 0
-  const fileJson = JSON.stringify({
+  const fileData: Record<string, unknown> = {
     type: 'file',
     schema: 'mcurator-midi',
     version: 1,
     createdBy: 'MIDIcurator',
     createdAt: new Date().toISOString().slice(0, 10),
     ppq: ticksPerBeat,
-  });
+  };
+  if (variantOf) fileData.variantOf = variantOf;
+  if (clipNotes) fileData.notes = clipNotes;
+  const fileJson = JSON.stringify(fileData);
   metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${fileJson}`) });
 
   // Leadsheet text event at tick 0 (if present)
@@ -141,6 +152,9 @@ export function createMIDITrack(
   segmentation?: Segmentation,
   barChords?: BarChordInfo[],
   leadsheet?: Leadsheet,
+  title?: string,
+  variantOf?: string,
+  clipNotes?: string,
 ): number[] {
   // All events as absolute-tick entries, converted to delta at the end
   const allEvents: Array<{ tick: number; data: number[] }> = [];
@@ -158,7 +172,7 @@ export function createMIDITrack(
   });
 
   // MCURATOR metadata events
-  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat, leadsheet);
+  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat, leadsheet, title, variantOf, clipNotes);
   allEvents.push(...metaEvents);
 
   // Note events
@@ -216,10 +230,13 @@ export function createMIDI(
   bpm: number,
   segmentation?: Segmentation,
   leadsheet?: Leadsheet,
+  title?: string,
+  variantOf?: string,
+  clipNotes?: string,
 ): Uint8Array {
   const ticksPerBeat = gesture.ticks_per_beat || 480;
   const header = createMIDIHeader(1, ticksPerBeat);
-  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords, leadsheet);
+  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords, leadsheet, title, variantOf, clipNotes);
 
   return new Uint8Array([...header, ...track]);
 }
@@ -227,7 +244,11 @@ export function createMIDI(
 // DOM-dependent download helpers (future Electron IPC boundary)
 
 export function downloadMIDI(clip: Clip): void {
-  const midiData = createMIDI(clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet);
+  const title = clip.filename.replace(/\.mid$/i, '');
+  const midiData = createMIDI(
+    clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet,
+    title, clip.sourceFilename, clip.notes || undefined,
+  );
   const blob = new Blob([midiData], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
 
@@ -251,7 +272,11 @@ export async function downloadVariantsAsZip(
   sourceFilename: string,
 ): Promise<void> {
   const files = variants.map(variant => {
-    const midiData = createMIDI(variant.gesture, variant.harmonic, variant.bpm);
+    const title = variant.filename.replace(/\.mid$/i, '');
+    const midiData = createMIDI(
+      variant.gesture, variant.harmonic, variant.bpm, variant.segmentation, variant.leadsheet,
+      title, variant.sourceFilename ?? sourceFilename, variant.notes || undefined,
+    );
     const actualDensity = variant.gesture.density.toFixed(2);
     const baseName = sourceFilename.replace(/\.mid$/i, '');
     const filename = `${baseName}_d${actualDensity}.mid`;

@@ -233,6 +233,10 @@ export interface McuratorMetadata {
   fileInfo?: Record<string, unknown>;
   /** Raw leadsheet input text (if embedded in MIDI metadata). */
   leadsheetText?: string;
+  /** Source clip filename (for variants). */
+  variantOf?: string;
+  /** Clip notes / generation info (for variants). */
+  clipNotes?: string;
 }
 
 const MARKER_PREFIX = 'MCURATOR v1 SEG';
@@ -292,14 +296,18 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
     }
   }
 
-  // Parse file-level info and leadsheet from text events at tick 0
+  // Parse file-level info, leadsheet, and variant metadata from text events
   let fileInfo: Record<string, unknown> | undefined;
   let leadsheetText: string | undefined;
+  let variantOf: string | undefined;
+  let clipNotes: string | undefined;
   for (const te of textEvents) {
     const json = parseTextJson(te.text);
     if (!json) continue;
     if (json.type === 'file') {
       fileInfo = json;
+      if (typeof json.variantOf === 'string') variantOf = json.variantOf;
+      if (typeof json.notes === 'string') clipNotes = json.notes;
     } else if (json.type === 'leadsheet' && typeof json.text === 'string') {
       leadsheetText = json.text;
     }
@@ -342,10 +350,10 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
     }
   }
 
-  if (segmentMap.size === 0 && !fileInfo && !leadsheetText) return null;
+  if (segmentMap.size === 0 && !fileInfo && !leadsheetText && !variantOf && !clipNotes) return null;
 
   const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
   const boundaries = segments.map(s => s.tick);
 
-  return { boundaries, segments, fileInfo, leadsheetText };
+  return { boundaries, segments, fileInfo, leadsheetText, variantOf, clipNotes };
 }

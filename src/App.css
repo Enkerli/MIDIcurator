@@ -622,6 +622,91 @@ body {
   cursor: not-allowed;
 }
 
+/* Progression generator */
+.mc-btn--gen-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--mc-bg-card);
+  border: 1px dashed var(--mc-accent);
+  border-radius: 6px;
+  color: var(--mc-accent);
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.mc-btn--gen-toggle:hover {
+  background: var(--mc-accent);
+  color: white;
+}
+
+.mc-progression-gen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--mc-bg-card);
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.mc-progression-gen__row {
+  display: flex;
+  gap: 6px;
+}
+
+.mc-progression-gen__select {
+  flex: 1;
+  padding: 5px 8px;
+  background: var(--mc-bg);
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  color: var(--mc-text);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.mc-progression-gen__select--key {
+  flex: 0 0 55px;
+}
+
+.mc-progression-gen__select--voicing {
+  flex: 1;
+}
+
+.mc-progression-gen__actions {
+  gap: 6px;
+}
+
+.mc-btn--generate {
+  flex: 1;
+  padding: 6px 12px;
+  background: var(--mc-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.mc-btn--generate:hover {
+  filter: brightness(1.1);
+}
+
+.mc-btn--gen-cancel {
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--mc-text-dim);
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.mc-btn--gen-cancel:hover {
+  color: var(--mc-text);
+  border-color: var(--mc-text-dim);
+}
+
 /* Keyboard shortcuts bar */
 .mc-shortcuts-bar {
   padding: 10px 20px;

@@ -13,6 +13,9 @@ import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
 import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
 import { substituteSegmentPitches } from '../lib/chord-substitute';
 import { parseLeadsheet } from '../lib/leadsheet-parser';
+import { PROGRESSIONS, transposeProgression } from '../lib/progressions';
+import type { VoicingShape } from '../lib/progressions';
+import { generateProgressionClip } from '../lib/generate-clip';
 import { Sidebar } from './Sidebar';
 import { ClipDetail } from './ClipDetail';
 import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
@@ -99,6 +102,7 @@ export function MidiCurator() {
         rating: null,
         notes: `Generated from ${selectedClip.filename} (density: ${densityMult}x, actual: ${actualDensity})`,
         source: selectedClip.id,
+        sourceFilename: selectedClip.filename,
       };
 
       await db.addClip(variant);
@@ -128,6 +132,7 @@ export function MidiCurator() {
       rating: null,
       notes: `Generated from ${selectedClip.filename} (density: ${densityMultiplier.toFixed(2)}x, actual: ${actualDensity})`,
       source: selectedClip.id,
+      sourceFilename: selectedClip.filename,
     };
 
     await db.addClip(variant);
@@ -196,7 +201,8 @@ export function MidiCurator() {
           gesture,
           harmonic,
           rating: null,
-          notes: '',
+          notes: mcurator?.clipNotes ?? '',
+          sourceFilename: mcurator?.variantOf,
           segmentation,
           leadsheet,
         };
@@ -232,7 +238,8 @@ export function MidiCurator() {
   }, [db, refreshClips, stop]);
 
   const handleDownloadCurrent = useCallback(() => {
-    if (selectedClip) downloadMIDI(selectedClip);
+    if (!selectedClip) return;
+    downloadMIDI(selectedClip);
   }, [selectedClip]);
 
   const handleDownloadVariantsZip = useCallback(() => {
@@ -520,6 +527,42 @@ export function MidiCurator() {
     }
   }, [db, loadingSamples, handleFileUpload]);
 
+  const handleGenerateProgression = useCallback(async (
+    progressionIndex: number,
+    keyOffset: number,
+    voicing: VoicingShape,
+  ) => {
+    if (!db) return;
+
+    const baseProg = PROGRESSIONS[progressionIndex];
+    if (!baseProg) return;
+
+    const prog = transposeProgression(baseProg, keyOffset);
+    const { notes, leadsheetText, filename, ppq } = generateProgressionClip(prog, voicing, 120);
+
+    if (notes.length === 0) return;
+
+    const gesture = extractGesture(notes, ppq);
+    const harmonic = extractHarmonic(notes, gesture);
+    const leadsheet = parseLeadsheet(leadsheetText, gesture.num_bars);
+
+    const clip: Clip = {
+      id: crypto.randomUUID(),
+      filename,
+      imported_at: Date.now(),
+      bpm: 120,
+      gesture,
+      harmonic,
+      rating: null,
+      notes: '',
+      leadsheet,
+    };
+
+    await db.addClip(clip);
+    refreshClips();
+    selectClip(clip);
+  }, [db, refreshClips, selectClip]);
+
   const filteredClips = useMemo(() => {
     if (!filterTag) return clips;
     const q = filterTag.toLowerCase();
@@ -728,6 +771,7 @@ export function MidiCurator() {
           fileInputRef={fileInputRef}
           onLoadSamples={handleLoadSamples}
           loadingSamples={loadingSamples}
+          onGenerateProgression={handleGenerateProgression}
         />
 
         {selectedClip ? (

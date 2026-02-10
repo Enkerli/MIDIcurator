@@ -6,14 +6,18 @@ interface VariantInfoProps {
 }
 
 export function VariantInfo({ clip, sourceClip }: VariantInfoProps) {
-  if (!clip.source) return null;
+  // Show variant info if we have a session-local source UUID or a persisted sourceFilename
+  if (!clip.source && !clip.sourceFilename) return null;
 
   const densityMatch = clip.notes?.match(/density: ([\d.]+)x/);
+
+  // Resolve display name: prefer live source clip's filename, fall back to persisted sourceFilename
+  const sourceName = sourceClip?.filename ?? clip.sourceFilename ?? 'unknown';
 
   return (
     <div className="mc-variant-info">
       <div style={{ marginBottom: 10 }}>
-        <strong>Variant of:</strong> {sourceClip?.filename ?? 'unknown'}
+        <strong>Variant of:</strong> {sourceName}
       </div>
       {densityMatch && (
         <div className="mc-variant-density">

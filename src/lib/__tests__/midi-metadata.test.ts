@@ -202,6 +202,103 @@ describe('leadsheet round-trip', () => {
   });
 });
 
+describe('variant metadata round-trip', () => {
+  it('round-trips variant notes and variantOf through export/import', () => {
+    const gesture = makeGesture();
+    const harmonic = makeHarmonic();
+
+    const midi = createMIDI(
+      gesture, harmonic, 120,
+      undefined, undefined,
+      'My Clip', 'source-clip.mid', 'Generated from source-clip.mid (density: 1.25x)',
+    );
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta).not.toBeNull();
+    expect(meta!.variantOf).toBe('source-clip.mid');
+    expect(meta!.clipNotes).toBe('Generated from source-clip.mid (density: 1.25x)');
+  });
+
+  it('returns undefined variant fields when not embedded', () => {
+    const gesture = makeGesture();
+    const harmonic = makeHarmonic();
+
+    const midi = createMIDI(gesture, harmonic, 120);
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta!.variantOf).toBeUndefined();
+    expect(meta!.clipNotes).toBeUndefined();
+  });
+
+  it('preserves variant metadata alongside leadsheet and segmentation', () => {
+    const gesture = makeGesture({ num_bars: 2, ticks_per_bar: 1920 });
+    const harmonic = makeHarmonic();
+    const segmentation: Segmentation = { boundaries: [960] };
+    const leadsheet: Leadsheet = parseLeadsheet('Am | Dm', 2);
+
+    const midi = createMIDI(
+      gesture, harmonic, 120,
+      segmentation, leadsheet,
+      'My Variant', 'original.mid', 'density 0.75x',
+    );
+    const parsed = parseMIDI(midi.buffer as ArrayBuffer);
+    const meta = extractMcuratorSegments(parsed);
+
+    expect(meta).not.toBeNull();
+    expect(meta!.boundaries).toEqual([960]);
+    expect(meta!.leadsheetText).toBe('Am | Dm');
+    expect(meta!.variantOf).toBe('original.mid');
+    expect(meta!.clipNotes).toBe('density 0.75x');
+  });
+});
+
+describe('MIDI sequence name', () => {
+  it('emits sequence/track name meta event (0x03) when title provided', () => {
+    const gesture = makeGesture();
+    const harmonic = makeHarmonic();
+
+    const midi = createMIDI(
+      gesture, harmonic, 120,
+      undefined, undefined,
+      'My Cool Track',
+    );
+
+    // Search for 0xFF 0x03 in the raw bytes
+    const bytes = Array.from(midi);
+    let found = false;
+    for (let i = 0; i < bytes.length - 2; i++) {
+      if (bytes[i] === 0xFF && bytes[i + 1] === 0x03) {
+        // Read the text content
+        const len = bytes[i + 2]!;
+        const text = String.fromCharCode(...bytes.slice(i + 3, i + 3 + len));
+        expect(text).toBe('My Cool Track');
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  it('does not emit sequence name when title is undefined', () => {
+    const gesture = makeGesture();
+    const harmonic = makeHarmonic();
+
+    const midi = createMIDI(gesture, harmonic, 120);
+
+    const bytes = Array.from(midi);
+    let found = false;
+    for (let i = 0; i < bytes.length - 2; i++) {
+      if (bytes[i] === 0xFF && bytes[i + 1] === 0x03) {
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(false);
+  });
+});
+
 describe('unknown fields resilience', () => {
   it('does not break when JSON has unknown fields', () => {
     const gesture = makeGesture();

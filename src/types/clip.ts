@@ -138,7 +138,10 @@ export interface Clip {
   harmonic: Harmonic;
   rating: number | null;
   notes: string;
+  /** Parent clip ID (session-local, for variant tracking in the current session). */
   source?: string;
+  /** Parent clip filename (persisted in MIDI metadata, survives export/reimport). */
+  sourceFilename?: string;
   segmentation?: Segmentation;
   /** Leadsheet (underlying chord) annotation, manually entered. */
   leadsheet?: Leadsheet;
