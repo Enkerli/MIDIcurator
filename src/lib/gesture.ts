@@ -84,6 +84,8 @@ export function toDetectedChord(match: ChordMatch | null): DetectedChord | null 
     templatePcs: match.templatePcs,
     extras: match.extras,
     missing: match.missing,
+    bassPc: match.bassPc,
+    bassName: match.bassName,
   };
 }
 

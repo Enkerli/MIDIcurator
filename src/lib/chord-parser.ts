@@ -114,8 +114,20 @@ export function parseChordSymbol(symbol: string): DetectedChord | null {
 
   const trimmed = symbol.trim();
 
+  // Check for /Bass suffix — split on last '/' where the part after looks like a note name
+  let mainPart = trimmed;
+  let bassSuffix: string | undefined;
+  const slashIdx = trimmed.lastIndexOf('/');
+  if (slashIdx > 0) {
+    const afterSlash = trimmed.slice(slashIdx + 1);
+    if (ROOT_PATTERN.test(afterSlash)) {
+      mainPart = trimmed.slice(0, slashIdx);
+      bassSuffix = afterSlash;
+    }
+  }
+
   // Extract root note
-  const rootMatch = trimmed.match(ROOT_PATTERN);
+  const rootMatch = mainPart.match(ROOT_PATTERN);
   if (!rootMatch) return null;
 
   const letter = rootMatch[1]!.toUpperCase();
@@ -129,7 +141,7 @@ export function parseChordSymbol(symbol: string): DetectedChord | null {
   const root = ((basePC + accidentalAdj) % 12 + 12) % 12;
 
   // Extract quality part (everything after the root)
-  const qualityPart = trimmed.slice(rootMatch[0].length);
+  const qualityPart = mainPart.slice(rootMatch[0].length);
 
   // Look up quality in aliases
   let qualityKey = QUALITY_ALIASES[qualityPart];
@@ -160,12 +172,33 @@ export function parseChordSymbol(symbol: string): DetectedChord | null {
   // Build the DetectedChord
   const rootDisplayName = getRootName(root);
 
+  // Parse bass note if present
+  let bassPc: number | undefined;
+  let bassName: string | undefined;
+  let bassSymbolSuffix = '';
+  if (bassSuffix) {
+    const bassMatch = bassSuffix.match(ROOT_PATTERN);
+    if (bassMatch) {
+      const bassLetter = bassMatch[1]!.toUpperCase();
+      const bassAcc = bassMatch[2] || '';
+      const bassBase = LETTER_TO_PC[bassLetter];
+      if (bassBase !== undefined) {
+        const bassAccAdj = ACCIDENTAL_ADJUST[bassAcc] ?? 0;
+        bassPc = ((bassBase + bassAccAdj) % 12 + 12) % 12;
+        bassName = getRootName(bassPc);
+        bassSymbolSuffix = `/${bassName}`;
+      }
+    }
+  }
+
   return {
     root,
     rootName: rootDisplayName,
     qualityKey: quality.key,
-    symbol: `${rootDisplayName}${quality.displayName}`,
+    symbol: `${rootDisplayName}${quality.displayName}${bassSymbolSuffix}`,
     qualityName: quality.fullName,
+    bassPc,
+    bassName,
   };
 }
 
@@ -191,12 +224,22 @@ export function getChordSuggestions(partial: string): string[] {
 
   const trimmed = partial.trim();
 
+  // Strip /Bass suffix for autocomplete matching
+  let mainPart = trimmed;
+  const slashIdx = trimmed.lastIndexOf('/');
+  if (slashIdx > 0) {
+    const afterSlash = trimmed.slice(slashIdx + 1);
+    if (ROOT_PATTERN.test(afterSlash)) {
+      mainPart = trimmed.slice(0, slashIdx);
+    }
+  }
+
   // Extract root if present
-  const rootMatch = trimmed.match(ROOT_PATTERN);
+  const rootMatch = mainPart.match(ROOT_PATTERN);
   if (!rootMatch) return [];
 
   const rootPart = rootMatch[0];
-  const qualityPart = trimmed.slice(rootPart.length).toLowerCase();
+  const qualityPart = mainPart.slice(rootPart.length).toLowerCase();
 
   // Get unique quality keys that match the partial
   const matchingQualities = Object.entries(QUALITY_ALIASES)

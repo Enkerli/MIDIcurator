@@ -40,7 +40,7 @@ export function createMIDIHeader(format: number, ticksPerBeat: number): number[]
 function buildSegmentEvents(
   tick: number,
   segIndex: number,
-  chord: { symbol: string; root: number; observedPcs?: number[]; templatePcs?: number[]; extras?: number[] } | null,
+  chord: { symbol: string; root: number; observedPcs?: number[]; templatePcs?: number[]; extras?: number[]; bassPc?: number } | null,
 ): Array<{ tick: number; data: number[] }> {
   const events: Array<{ tick: number; data: number[] }> = [];
 
@@ -61,6 +61,9 @@ function buildSegmentEvents(
     if (chord.templatePcs) segJson.pcsTpl = chord.templatePcs;
     if (chord.extras && chord.extras.length > 0) {
       segJson.extras = chord.extras;
+    }
+    if (chord.bassPc !== undefined) {
+      segJson.bassPc = chord.bassPc;
     }
   }
   events.push({ tick, data: encodeTextMeta(0x01, `MCURATOR:v1 ${JSON.stringify(segJson)}`) });

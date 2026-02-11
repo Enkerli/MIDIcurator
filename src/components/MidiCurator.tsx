@@ -320,6 +320,8 @@ export function MidiCurator() {
           templatePcs: match.templatePcs,
           extras: match.extras,
           missing: match.missing,
+          bassPc: match.bassPc,
+          bassName: match.bassName,
         }
       : null;
 

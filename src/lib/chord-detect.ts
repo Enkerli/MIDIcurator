@@ -21,6 +21,7 @@ import {
   pcsToDecimal,
   rotatePcs,
   rootName,
+  spellInChordContext,
 } from './chord-dictionary';
 
 export type { ChordMatch } from './chord-dictionary';
@@ -39,13 +40,16 @@ export function detectChord(pitches: number[]): ChordMatch | null {
 
   if (uniquePcs.length < 2) return null; // Single note = no chord
 
+  // Compute lowest sounding pitch for slash chord detection
+  const lowestPitch = Math.min(...pitches);
+
   // Try exact match first (all PCs in input match a dictionary entry exactly)
-  const exactMatch = findExactMatch(uniquePcs);
+  const exactMatch = findExactMatch(uniquePcs, lowestPitch);
   if (exactMatch) return exactMatch;
 
   // Try subset matching: maybe the input has passing tones or doublings
   // that don't match exactly, but a subset does
-  const subsetMatch = findBestSubsetMatch(uniquePcs);
+  const subsetMatch = findBestSubsetMatch(uniquePcs, lowestPitch);
   if (subsetMatch) return subsetMatch;
 
   return null;
@@ -53,10 +57,19 @@ export function detectChord(pitches: number[]): ChordMatch | null {
 
 /**
  * Detect a chord from pitch classes (0-11) directly.
+ * No register info available, so slash chords are never produced.
  */
 export function detectChordFromPcs(pitchClasses: number[]): ChordMatch | null {
-  const fakePitches = pitchClasses.map(pc => pc + 60); // octave doesn't matter
-  return detectChord(fakePitches);
+  const uniquePcs = [...new Set(pitchClasses.map(p => ((p % 12) + 12) % 12))];
+  if (uniquePcs.length < 2) return null;
+
+  const exactMatch = findExactMatch(uniquePcs);
+  if (exactMatch) return exactMatch;
+
+  const subsetMatch = findBestSubsetMatch(uniquePcs);
+  if (subsetMatch) return subsetMatch;
+
+  return null;
 }
 
 // ─── Internal matching ─────────────────────────────────────────────────
@@ -68,7 +81,7 @@ interface ScoredMatch {
   extraNotes: number;
 }
 
-function findExactMatch(uniquePcs: number[]): ChordMatch | null {
+function findExactMatch(uniquePcs: number[], lowestPitch?: number): ChordMatch | null {
   const candidates: ScoredMatch[] = [];
 
   for (let root = 0; root < 12; root++) {
@@ -100,10 +113,10 @@ function findExactMatch(uniquePcs: number[]): ChordMatch | null {
   });
 
   const best = candidates[0];
-  return buildMatch(best.root, best.quality, uniquePcs);
+  return buildMatch(best.root, best.quality, uniquePcs, lowestPitch);
 }
 
-function findBestSubsetMatch(uniquePcs: number[]): ChordMatch | null {
+function findBestSubsetMatch(uniquePcs: number[], lowestPitch?: number): ChordMatch | null {
   const candidates: ScoredMatch[] = [];
 
   // For each possible root, try to find a quality where the quality's PCS
@@ -145,7 +158,7 @@ function findBestSubsetMatch(uniquePcs: number[]): ChordMatch | null {
   });
 
   const best = candidates[0];
-  return buildMatch(best.root, best.quality, uniquePcs);
+  return buildMatch(best.root, best.quality, uniquePcs, lowestPitch);
 }
 
 /** Map a root-relative semitone distance to a readable interval label. */
@@ -157,7 +170,12 @@ function intervalLabel(semitones: number): string {
   return labels[semitones] ?? `+${semitones}`;
 }
 
-function buildMatch(root: number, quality: ChordQuality, observedPcsAbsolute: number[]): ChordMatch {
+function buildMatch(
+  root: number,
+  quality: ChordQuality,
+  observedPcsAbsolute: number[],
+  lowestPitch?: number,
+): ChordMatch {
   const rn = rootName(root);
 
   // Compute absolute template PCs
@@ -175,7 +193,21 @@ function buildMatch(root: number, quality: ChordQuality, observedPcsAbsolute: nu
     const extraIntervals = extras.map(pc => `add${intervalLabel((pc - root + 12) % 12)}`);
     extrasSuffix = `(${extraIntervals.join(',')})`;
   }
-  const symbol = `${rn}${display}${extrasSuffix}`;
+
+  // Slash chord detection: when lowest pitch is a chord tone but not the root
+  let bassPc: number | undefined;
+  let bassName: string | undefined;
+  let bassSuffix = '';
+  if (lowestPitch !== undefined) {
+    const lowestPc = ((lowestPitch % 12) + 12) % 12;
+    if (lowestPc !== root && templateSet.has(lowestPc)) {
+      bassPc = lowestPc;
+      bassName = spellInChordContext(lowestPc, root, rn);
+      bassSuffix = `/${bassName}`;
+    }
+  }
+
+  const symbol = `${rn}${display}${extrasSuffix}${bassSuffix}`;
 
   return {
     root,
@@ -186,6 +218,8 @@ function buildMatch(root: number, quality: ChordQuality, observedPcsAbsolute: nu
     templatePcs,
     extras,
     missing,
+    bassPc,
+    bassName,
   };
 }
 

@@ -108,6 +108,54 @@ describe('transposeProgression — identity', () => {
   });
 });
 
+describe('transposeProgression — slash chord labels', () => {
+  it('transposes slash chord labels correctly', () => {
+    const prog = {
+      name: 'Slash Test',
+      chords: [
+        { root: 60, intervals: [0, 4, 7], label: 'C/E' },
+        { root: 55, intervals: [0, 4, 7], label: 'G/B' },
+        { root: 53, intervals: [0, 4, 7], label: 'F/A' },
+      ],
+      leadsheet: 'C/E | G/B | F/A',
+    };
+
+    // Transpose up by 2 semitones (C → D)
+    const transposed = transposeProgression(prog, 2);
+    expect(transposed.chords[0]!.label).toBe('D/F♯');
+    expect(transposed.chords[1]!.label).toBe('A/C♯');
+    expect(transposed.chords[2]!.label).toBe('G/B');
+  });
+
+  it('transposes slash chord to flat keys', () => {
+    const prog = {
+      name: 'Slash Flat Test',
+      chords: [
+        { root: 60, intervals: [0, 3, 7], label: 'Cm/Eb' },
+      ],
+      leadsheet: 'Cm/Eb',
+    };
+
+    // Transpose up by 1 semitone (→ Db)
+    const transposed = transposeProgression(prog, 1);
+    expect(transposed.chords[0]!.label).toBe('D♭m/E');
+  });
+
+  it('labels without slash are unaffected', () => {
+    const prog = {
+      name: 'No Slash',
+      chords: [
+        { root: 60, intervals: [0, 4, 7], label: 'C' },
+      ],
+      leadsheet: 'C',
+    };
+
+    const transposed = transposeProgression(prog, 5);
+    expect(transposed.chords[0]!.label).toBe('F');
+    expect(transposed.chords[0]!.label).not.toContain('/');
+  });
+});
+
 describe('transposeProgression — re-parse Unicode labels', () => {
   it('labels with Unicode accidentals survive re-parsing by parseLabelRoot', () => {
     // Transpose to F♯ (+6), producing Unicode sharp labels

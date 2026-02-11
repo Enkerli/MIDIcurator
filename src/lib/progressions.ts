@@ -196,25 +196,45 @@ export const PROGRESSIONS: Progression[] = [
  * Parse a chord label into root pitch class + quality suffix.
  * E.g. "Dm7" → { rootPc: 2, quality: "m7" }, "Bbmaj7" → { rootPc: 10, quality: "maj7" }
  */
-function parseLabelRoot(label: string): { rootPc: number; quality: string } {
-  const labelToPC: Record<string, number> = {
-    'C': 0, 'C#': 1, 'C♯': 1, 'Db': 1, 'D♭': 1,
-    'D': 2, 'D#': 3, 'D♯': 3, 'Eb': 3, 'E♭': 3,
-    'E': 4, 'E#': 5, 'E♯': 5, 'Fb': 4, 'F♭': 4,
-    'F': 5, 'F#': 6, 'F♯': 6, 'Gb': 6, 'G♭': 6,
-    'G': 7, 'G#': 8, 'G♯': 8, 'Ab': 8, 'A♭': 8,
-    'A': 9, 'A#': 10, 'A♯': 10, 'Bb': 10, 'B♭': 10,
-    'B': 11, 'B#': 0, 'B♯': 0, 'Cb': 11, 'C♭': 11,
-  };
+const LABEL_TO_PC: Record<string, number> = {
+  'C': 0, 'C#': 1, 'C♯': 1, 'Db': 1, 'D♭': 1,
+  'D': 2, 'D#': 3, 'D♯': 3, 'Eb': 3, 'E♭': 3,
+  'E': 4, 'E#': 5, 'E♯': 5, 'Fb': 4, 'F♭': 4,
+  'F': 5, 'F#': 6, 'F♯': 6, 'Gb': 6, 'G♭': 6,
+  'G': 7, 'G#': 8, 'G♯': 8, 'Ab': 8, 'A♭': 8,
+  'A': 9, 'A#': 10, 'A♯': 10, 'Bb': 10, 'B♭': 10,
+  'B': 11, 'B#': 0, 'B♯': 0, 'Cb': 11, 'C♭': 11,
+};
+
+function parseLabelRoot(label: string): { rootPc: number; quality: string; bassPc?: number; bassSuffix?: string } {
+  // Check for /Bass suffix
+  let mainPart = label;
+  let bassPc: number | undefined;
+  let bassSuffix: string | undefined;
+  const slashIdx = label.lastIndexOf('/');
+  if (slashIdx > 0) {
+    const afterSlash = label.slice(slashIdx + 1);
+    // Try to parse the bass note (2-char then 1-char)
+    for (const len of [2, 1]) {
+      if (len > afterSlash.length) continue;
+      const candidate = afterSlash.slice(0, len);
+      if (LABEL_TO_PC[candidate] !== undefined && len === afterSlash.length) {
+        bassPc = LABEL_TO_PC[candidate]!;
+        bassSuffix = afterSlash;
+        mainPart = label.slice(0, slashIdx);
+        break;
+      }
+    }
+  }
 
   // Try 2-char root first (e.g. "Bb", "F#", "E♯"), then 1-char
   for (const len of [2, 1]) {
-    const candidate = label.slice(0, len);
-    if (labelToPC[candidate] !== undefined) {
-      return { rootPc: labelToPC[candidate]!, quality: label.slice(len) };
+    const candidate = mainPart.slice(0, len);
+    if (LABEL_TO_PC[candidate] !== undefined) {
+      return { rootPc: LABEL_TO_PC[candidate]!, quality: mainPart.slice(len), bassPc, bassSuffix };
     }
   }
-  return { rootPc: 0, quality: label };
+  return { rootPc: 0, quality: mainPart, bassPc, bassSuffix };
 }
 
 /**
@@ -228,9 +248,13 @@ export function transposeProgression(prog: Progression, semitones: number): Prog
 
   const chords = prog.chords.map(chord => {
     const newRoot = chord.root + semitones;
-    const { rootPc, quality } = parseLabelRoot(chord.label);
+    const { rootPc, quality, bassPc } = parseLabelRoot(chord.label);
     const newPc = ((rootPc + semitones) % 12 + 12) % 12;
-    const newLabel = spellRoot(newPc, targetKeyPc) + quality;
+    let newLabel = spellRoot(newPc, targetKeyPc) + quality;
+    if (bassPc !== undefined) {
+      const newBassPc = ((bassPc + semitones) % 12 + 12) % 12;
+      newLabel += `/${spellRoot(newBassPc, targetKeyPc)}`;
+    }
     return { ...chord, root: newRoot, label: newLabel };
   });
 

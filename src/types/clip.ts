@@ -41,6 +41,10 @@ export interface DetectedChord {
   extras?: number[];
   /** Pitch classes in template but not observed (missing tones) */
   missing?: number[];
+  /** Bass pitch class for slash chords (undefined = root position) */
+  bassPc?: number;
+  /** Bass note name for slash chords (e.g. "F" in "Dm/F") */
+  bassName?: string;
 }
 
 /** A sub-bar chord segment (for bars with multiple chords). */

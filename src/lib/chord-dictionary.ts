@@ -47,6 +47,10 @@ export interface ChordMatch {
   extras: number[];
   /** Template PCs not observed */
   missing: number[];
+  /** Bass pitch class for slash chords (undefined = root position) */
+  bassPc?: number;
+  /** Bass note name for slash chords (e.g. "F" in "Dm/F") */
+  bassName?: string;
 }
 
 // ─── Note name utilities ───────────────────────────────────────────────
