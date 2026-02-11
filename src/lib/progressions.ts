@@ -5,6 +5,8 @@
  * generator script (scripts/generate-samples.mjs).
  */
 
+import { spellRoot } from './chord-dictionary';
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface ProgressionChord {
@@ -39,12 +41,6 @@ export type VoicingShape =
 export const KEY_NAMES = [
   'C', 'D♭', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B',
 ] as const;
-
-/** Map from pitch class (0-11) to sharp/flat label for chord symbols. */
-const PC_LABEL: Record<number, string> = {
-  0: 'C', 1: 'Db', 2: 'D', 3: 'Eb', 4: 'E', 5: 'F',
-  6: 'F#', 7: 'G', 8: 'Ab', 9: 'A', 10: 'Bb', 11: 'B',
-};
 
 export const VOICING_LABELS: Record<VoicingShape, string> = {
   'block': 'Block',
@@ -202,11 +198,16 @@ export const PROGRESSIONS: Progression[] = [
  */
 function parseLabelRoot(label: string): { rootPc: number; quality: string } {
   const labelToPC: Record<string, number> = {
-    'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'F': 5,
-    'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11,
+    'C': 0, 'C#': 1, 'C♯': 1, 'Db': 1, 'D♭': 1,
+    'D': 2, 'D#': 3, 'D♯': 3, 'Eb': 3, 'E♭': 3,
+    'E': 4, 'E#': 5, 'E♯': 5, 'Fb': 4, 'F♭': 4,
+    'F': 5, 'F#': 6, 'F♯': 6, 'Gb': 6, 'G♭': 6,
+    'G': 7, 'G#': 8, 'G♯': 8, 'Ab': 8, 'A♭': 8,
+    'A': 9, 'A#': 10, 'A♯': 10, 'Bb': 10, 'B♭': 10,
+    'B': 11, 'B#': 0, 'B♯': 0, 'Cb': 11, 'C♭': 11,
   };
 
-  // Try 2-char root first (e.g. "Bb", "F#"), then 1-char
+  // Try 2-char root first (e.g. "Bb", "F#", "E♯"), then 1-char
   for (const len of [2, 1]) {
     const candidate = label.slice(0, len);
     if (labelToPC[candidate] !== undefined) {
@@ -223,11 +224,13 @@ function parseLabelRoot(label: string): { rootPc: number; quality: string } {
 export function transposeProgression(prog: Progression, semitones: number): Progression {
   if (semitones === 0) return prog;
 
+  const targetKeyPc = ((semitones % 12) + 12) % 12;
+
   const chords = prog.chords.map(chord => {
     const newRoot = chord.root + semitones;
     const { rootPc, quality } = parseLabelRoot(chord.label);
     const newPc = ((rootPc + semitones) % 12 + 12) % 12;
-    const newLabel = PC_LABEL[newPc]! + quality;
+    const newLabel = spellRoot(newPc, targetKeyPc) + quality;
     return { ...chord, root: newRoot, label: newLabel };
   });
 

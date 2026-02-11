@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import type { Clip, DetectedChord } from '../types/clip';
-import { rootName } from '../lib/chord-dictionary';
+import { rootName, spellInChordContext } from '../lib/chord-dictionary';
 import { parseChordSymbol } from '../lib/chord-parser';
 
 interface StatsGridProps {
@@ -149,11 +149,14 @@ export function StatsGrid({
     ? `[${[...new Set(effectiveChordInfo.pitchClasses)].sort((a, b) => a - b).join(',')}]`
     : '';
 
-  // Format note names for display (e.g., "G D B♭")
+  // Format note names for display, spelled consistently with the chord root's accidental
+  const chordRoot = effectiveChordInfo.chord;
   const noteNamesStr = effectiveChordInfo.pitchClasses.length > 0
     ? [...new Set(effectiveChordInfo.pitchClasses)]
         .sort((a, b) => a - b)
-        .map(pc => rootName(pc))
+        .map(pc => chordRoot
+          ? spellInChordContext(pc, chordRoot.root, chordRoot.rootName)
+          : rootName(pc))
         .join(' ')
     : '';
 

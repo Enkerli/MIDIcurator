@@ -70,6 +70,75 @@ export function rootNameFlat(pc: number): string {
   return NOTE_NAMES_FLAT[pc % 12];
 }
 
+// Sharp keys: G(1♯), D(2♯), A(3♯), E(4♯), B(5♯), F♯(6♯)
+const SHARP_KEYS: ReadonlySet<number> = new Set([7, 2, 9, 4, 11, 6]);
+// Flat keys: F(1♭), B♭(2♭), E♭(3♭), A♭(4♭), D♭(5♭)
+const FLAT_KEYS: ReadonlySet<number> = new Set([5, 10, 3, 8, 1]);
+
+/**
+ * Spell a pitch class name correctly for a given key context.
+ * When keyPc is provided, uses the key signature's spelling rules:
+ *   - Sharp keys → sharp chromatic names (+ diatonic E♯, B♯ where needed)
+ *   - Flat keys  → flat chromatic names  (+ diatonic C♭, F♭ where needed)
+ *   - C          → mixed default
+ * When keyPc is omitted, falls back to the existing mixed NOTE_NAMES spelling.
+ */
+export function spellRoot(pc: number, keyPc?: number): string {
+  if (keyPc === undefined) return rootName(pc);
+  const k = ((keyPc % 12) + 12) % 12;
+  const p = ((pc % 12) + 12) % 12;
+
+  // Diatonic overrides for extreme keys (beyond rootNameSharp/rootNameFlat)
+  if (k === 6 && p === 0) return 'B♯';  // F♯ major: scale degree 4♯ enharmonic
+  if (k === 6 && p === 5) return 'E♯';  // F♯ major: leading tone
+  if (k === 11 && p === 5) return 'E♯'; // B major: leading tone
+  if (k === 8 && p === 4) return 'F♭';  // A♭ major: subdominant
+  if (k === 1 && p === 11) return 'C♭'; // D♭ major: leading tone
+
+  if (SHARP_KEYS.has(k)) return rootNameSharp(p);
+  if (FLAT_KEYS.has(k)) return rootNameFlat(p);
+  return rootName(p); // C major — mixed default
+}
+
+/**
+ * Spell a pitch class consistently with a chord root's accidental direction.
+ * Unlike `spellRoot(pc, keyPc)` which classifies by key signature,
+ * this derives the direction from the root name itself:
+ *   - Root contains ♯ or # → sharp spelling (+ diatonic E♯/B♯ for extreme roots)
+ *   - Root contains ♭ or b (not at start) → flat spelling (+ diatonic C♭/F♭)
+ *   - Natural root → use `spellRoot(pc, rootPc)` for key-aware context
+ *
+ * This avoids the mixed-default contradiction where rootName(1) = "C♯"
+ * but key-signature classification of PC 1 = D♭ major (flat key).
+ */
+export function spellInChordContext(pc: number, rootPc: number, rootNameStr?: string): string {
+  const rn = rootNameStr ?? rootName(rootPc);
+  const p = ((pc % 12) + 12) % 12;
+  const r = ((rootPc % 12) + 12) % 12;
+
+  if (rn.includes('♯') || rn.includes('#')) {
+    // Apply diatonic overrides for sharp-rooted chords:
+    // A third from B♯(0) is D♯♯ — too exotic, skip.
+    // But a third from C♯(1) is E♯, a third from F♯(6) is A♯,
+    // and the seventh of C♯ is B♯. Use the root PC for overrides.
+    if (r === 1 && p === 5) return 'E♯';   // C♯: major 3rd = E♯
+    if (r === 1 && p === 0) return 'B♯';   // C♯: major 7th = B♯
+    if (r === 6 && p === 0) return 'B♯';   // F♯: perfect 4th / enharmonic
+    if (r === 6 && p === 5) return 'E♯';   // F♯: major 7th = E♯
+    return rootNameSharp(p);
+  }
+  if (rn.includes('♭') || (rn.length > 1 && rn.includes('b'))) {
+    // Diatonic overrides for flat-rooted chords:
+    if (r === 8 && p === 4) return 'F♭';   // A♭: major 6th context
+    if (r === 1 && p === 11) return 'C♭';  // D♭: major 7th = C (but as root D♭, 7th is C)
+    if (r === 6 && p === 4) return 'F♭';   // G♭: major 7th = F♭
+    if (r === 6 && p === 11) return 'C♭';  // G♭: perfect 4th = C♭
+    return rootNameFlat(p);
+  }
+  // Natural root — delegate to key-aware spelling
+  return spellRoot(p, rootPc);
+}
+
 // ─── Fingerprint utilities ─────────────────────────────────────────────
 
 /**

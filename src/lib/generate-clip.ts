@@ -227,13 +227,19 @@ export function generateProgressionClip(
     notes.push(...voiceFn(chord, barIdx));
   }
 
+  // Build leadsheet with one chord per bar, matching the note layout.
+  // The progression.leadsheet may group multiple chords per bar (e.g. Coltrane
+  // Changes: "Cmaj7 Ab7 | Dbmaj7 A7 | ..."), but the generator always places
+  // one chord per bar, so the leadsheet must match that structure.
+  const generatedLeadsheet = progression.chords.map(c => c.label).join(' | ');
+
   const safeName = progression.name.replace(/[^a-zA-Z0-9]+/g, '-');
   const safeVoicing = voicing.replace(/[^a-zA-Z0-9]+/g, '-');
   const filename = `${safeName}_${safeVoicing}_${bpm}bpm.mid`;
 
   return {
     notes,
-    leadsheetText: progression.leadsheet,
+    leadsheetText: generatedLeadsheet,
     filename,
     ppq: PPQ,
   };
