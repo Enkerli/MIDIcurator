@@ -8,6 +8,8 @@ interface ChordBarProps {
   ticksPerBeat: number;
   /** Total tick span matching the piano roll (note extent + padding). */
   totalTicks?: number;
+  /** When set, use pixel widths instead of percentages (for zoom alignment). */
+  drawWidth?: number;
   selectionRange?: TickRange | null;
   onSegmentClick?: (startTick: number, endTick: number) => void;
   onChordEdit?: (startTick: number, endTick: number, newChordSymbol: string) => void;
@@ -164,6 +166,7 @@ export function ChordBar({
   ticksPerBar,
   ticksPerBeat,
   totalTicks: totalTicksProp,
+  drawWidth,
   selectionRange,
   onSegmentClick,
   onChordEdit,
@@ -179,7 +182,11 @@ export function ChordBar({
   // Falls back to bar-grid approximation when totalTicks is not provided.
   const numBars = barChords.length;
   const totalTicks = totalTicksProp ?? (numBars * ticksPerBar + ticksPerBeat);
+
+  // When drawWidth is provided (zoom mode), use pixel widths; otherwise percentages
+  const usePixelWidths = drawWidth !== undefined;
   const barWidthPercent = (ticksPerBar / totalTicks) * 100;
+  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
 
   const handleDoubleClick = (bar: number, segmentIndex: number) => {
     if (onChordEdit) {
@@ -198,12 +205,22 @@ export function ChordBar({
     setEditingCell(null);
   };
 
+  // Helper: width style for a given tick span
+  const widthStyle = (ticks: number) =>
+    usePixelWidths
+      ? { width: `${(ticks / totalTicks) * drawWidth}px` }
+      : { width: `${(ticks / totalTicks) * 100}%` };
+
+  // Total container width when zoomed
+  const containerStyle = usePixelWidths
+    ? { width: `${drawWidth}px` }
+    : undefined;
+
   // ─── Segment-based rendering (when segmentation boundaries exist) ────
   if (segmentChords && segmentChords.length > 0) {
     return (
-      <div className="mc-chord-bar">
+      <div className="mc-chord-bar" style={containerStyle}>
         {segmentChords.map((seg) => {
-          const widthPercent = ((seg.endTick - seg.startTick) / totalTicks) * 100;
           const { displayText, isEmpty, hasExtras } = formatChordDisplay(seg.chord, seg.pitchClasses);
           const isSelected = selectionRange
             && selectionRange.startTick === seg.startTick
@@ -214,7 +231,7 @@ export function ChordBar({
               key={seg.index}
               className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isSelected ? 'mc-chord-bar-cell--selected' : ''}`}
               style={{
-                width: `${widthPercent}%`,
+                ...widthStyle(seg.endTick - seg.startTick),
                 cursor: onSegmentClick ? 'pointer' : undefined,
               }}
               title={seg.chord
@@ -234,7 +251,7 @@ export function ChordBar({
 
   // ─── Bar-based rendering (default, no segmentation) ──────────────────
   return (
-    <div className="mc-chord-bar">
+    <div className="mc-chord-bar" style={containerStyle}>
       {barChords.map((bc) => {
         // Check if this bar has multiple segments
         const hasSegments = bc.segments && bc.segments.length > 1;
@@ -247,7 +264,7 @@ export function ChordBar({
             <div
               key={bc.bar}
               className="mc-chord-bar-cell mc-chord-bar-cell--segmented"
-              style={{ width: `${barWidthPercent}%` }}
+              style={{ ...(usePixelWidths ? { width: `${barWidthPx}px` } : { width: `${barWidthPercent}%` }) }}
               title={`Bar ${bc.bar + 1}: ${bc.segments!.length} segments`}
             >
               {bc.segments!.map((seg, i) => {
@@ -310,7 +327,7 @@ export function ChordBar({
             key={bc.bar}
             className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isBarSelected ? 'mc-chord-bar-cell--selected' : ''} ${isEditing ? 'mc-chord-bar-cell--editing' : ''}`}
             style={{
-              width: `${barWidthPercent}%`,
+              ...(usePixelWidths ? { width: `${barWidthPx}px` } : { width: `${barWidthPercent}%` }),
               cursor: onSegmentClick ? 'pointer' : undefined,
             }}
             title={!isEditing ? titleText : undefined}

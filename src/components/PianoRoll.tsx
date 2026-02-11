@@ -24,6 +24,10 @@ interface PianoRollProps {
   isPlaying: boolean;
   /** Canvas height in CSS pixels */
   height?: number;
+  /** Zoom level (1 = fit to width, >1 = zoomed in) */
+  zoomLevel?: number;
+  /** Called when user zooms via Ctrl/Cmd+wheel */
+  onZoomChange?: (newZoom: number) => void;
   /** Snapped tick range to highlight (null = no selection) */
   selectionRange: TickRange | null;
   /** Called when user completes a drag selection or clicks to clear */
@@ -68,11 +72,17 @@ function getThemeColors(): {
   };
 }
 
+/** Min / max zoom bounds */
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 10;
+
 export function PianoRoll({
   clip,
   playbackTime,
   isPlaying,
   height = 240,
+  zoomLevel = 1,
+  onZoomChange,
   selectionRange,
   onRangeSelect,
   scissorsMode = false,
@@ -99,8 +109,13 @@ export function PianoRoll({
   const draggingBoundaryCurrentTick = useRef<number | null>(null);
 
   const draw = useCallback(
-    (canvas: HTMLCanvasElement, width: number) => {
+    (canvas: HTMLCanvasElement, containerWidth: number) => {
       const dpr = window.devicePixelRatio || 1;
+      // Compute layout with zoom — when zoomed, layout.width > containerWidth
+      const layout = computeLayout(clip.gesture, clip.harmonic, containerWidth, height, zoomLevel);
+      layoutRef.current = layout;
+      const width = layout.width;
+
       canvas.width = width * dpr;
       canvas.height = height * dpr;
       canvas.style.width = `${width}px`;
@@ -111,8 +126,6 @@ export function PianoRoll({
       ctx.scale(dpr, dpr);
 
       const theme = getThemeColors();
-      const layout = computeLayout(clip.gesture, clip.harmonic, width, height);
-      layoutRef.current = layout;
 
       // Background
       ctx.fillStyle = theme.bg;
@@ -254,7 +267,7 @@ export function PianoRoll({
         }
       }
     },
-    [clip, playbackTime, isPlaying, height, selectionRange, scissorsMode, boundaries],
+    [clip, playbackTime, isPlaying, height, zoomLevel, selectionRange, scissorsMode, boundaries],
   );
 
   // ─── Mouse handlers ─────────────────────────────────────────────────
@@ -483,6 +496,16 @@ export function PianoRoll({
     }
   }, [scissorsMode, findBoundaryNear, onBoundaryRemove]);
 
+  // Ctrl/Cmd + wheel → zoom in/out
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+
+    const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel * factor));
+    onZoomChange?.(next);
+  }, [zoomLevel, onZoomChange]);
+
   // Observe container width for responsive sizing
   useEffect(() => {
     const container = containerRef.current;
@@ -515,6 +538,7 @@ export function PianoRoll({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
+        onWheel={handleWheel}
       />
     </div>
   );

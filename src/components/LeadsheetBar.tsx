@@ -5,6 +5,8 @@ interface LeadsheetBarProps {
   ticksPerBar: number;
   totalTicks: number;
   numBars: number;
+  /** When set, use pixel widths instead of percentages (for zoom alignment). */
+  drawWidth?: number;
 }
 
 /**
@@ -16,13 +18,20 @@ export function LeadsheetBar({
   ticksPerBar,
   totalTicks,
   numBars,
+  drawWidth,
 }: LeadsheetBarProps) {
   if (leadsheet.bars.length === 0) return null;
 
+  const usePixelWidths = drawWidth !== undefined;
   const barWidthPercent = (ticksPerBar / totalTicks) * 100;
+  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
+  const barWidthStyle = usePixelWidths
+    ? { width: `${barWidthPx}px` }
+    : { width: `${barWidthPercent}%` };
+  const containerStyle = usePixelWidths ? { width: `${drawWidth}px` } : undefined;
 
   return (
-    <div className="mc-leadsheet-bar">
+    <div className="mc-leadsheet-bar" style={containerStyle}>
       {Array.from({ length: numBars }, (_, i) => {
         const bar = leadsheet.bars.find(b => b.bar === i);
 
@@ -31,7 +40,7 @@ export function LeadsheetBar({
             <div
               key={i}
               className="mc-leadsheet-cell mc-leadsheet-cell--nc"
-              style={{ width: `${barWidthPercent}%` }}
+              style={barWidthStyle}
               title={`Bar ${i + 1}: no chord`}
             >
               <span className="mc-leadsheet-chord mc-leadsheet-chord--nc">NC</span>
@@ -44,7 +53,7 @@ export function LeadsheetBar({
             <div
               key={i}
               className="mc-leadsheet-cell mc-leadsheet-cell--repeat"
-              style={{ width: `${barWidthPercent}%` }}
+              style={barWidthStyle}
               title={`Bar ${i + 1}: repeat`}
             >
               <span className="mc-leadsheet-chord mc-leadsheet-chord--repeat">%</span>
@@ -59,7 +68,7 @@ export function LeadsheetBar({
             <div
               key={i}
               className="mc-leadsheet-cell mc-leadsheet-cell--nc"
-              style={{ width: `${barWidthPercent}%` }}
+              style={barWidthStyle}
               title={`Bar ${i + 1}: no chord`}
             >
               <span className="mc-leadsheet-chord mc-leadsheet-chord--nc">NC</span>
@@ -71,7 +80,7 @@ export function LeadsheetBar({
           <div
             key={i}
             className="mc-leadsheet-cell"
-            style={{ width: `${barWidthPercent}%` }}
+            style={barWidthStyle}
             title={`Bar ${i + 1}: ${bar.chords.map(c => c.chord?.symbol ?? c.inputText).join(' ')}`}
           >
             {bar.chords.map((lc, j) => {

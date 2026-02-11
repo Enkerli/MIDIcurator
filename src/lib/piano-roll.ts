@@ -48,16 +48,20 @@ export function isBlackKey(midi: number): boolean {
 /**
  * Compute layout metrics from gesture/harmonic data and available canvas size.
  * Adds 2 semitones of padding above and below the pitch range.
+ *
+ * When zoomLevel > 1, pxPerTick increases proportionally, making the canvas
+ * wider than the container (the caller is responsible for scroll overflow).
  */
 export function computeLayout(
   gesture: Gesture,
   harmonic: Harmonic,
   canvasWidth: number,
   canvasHeight: number,
+  zoomLevel = 1,
 ): PianoRollLayout {
   const labelWidth = 40;
   const topPad = 4;
-  const drawWidth = canvasWidth - labelWidth;
+  const baseDrawWidth = canvasWidth - labelWidth;
   const drawHeight = canvasHeight - topPad * 2;
 
   const minPitch = Math.max(0, Math.min(...harmonic.pitches) - 2);
@@ -70,11 +74,16 @@ export function computeLayout(
   // Add a little padding at the end (1 beat worth)
   const totalTicks = lastTick + gesture.ticks_per_beat;
 
-  const pxPerTick = drawWidth / totalTicks;
+  const pxPerTick = (baseDrawWidth / totalTicks) * zoomLevel;
   const pxPerSemitone = drawHeight / pitchRange;
 
+  // When zoomed, the full canvas width expands beyond the container
+  const width = zoomLevel > 1
+    ? Math.ceil(baseDrawWidth * zoomLevel) + labelWidth
+    : canvasWidth;
+
   return {
-    width: canvasWidth,
+    width,
     height: canvasHeight,
     pxPerTick,
     pxPerSemitone,

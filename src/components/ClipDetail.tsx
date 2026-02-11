@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import type { Clip, DetectedChord } from '../types/clip';
 import type { PlaybackState } from '../lib/playback';
 import type { TickRange } from '../lib/piano-roll';
@@ -108,6 +108,63 @@ export function ClipDetail({
     return lastTick + ticks_per_beat;
   }, [clip.gesture]);
 
+  // ─── Zoom state ────────────────────────────────────────────────────
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const labelWidth = 40;
+
+  // Track container width via ResizeObserver
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      }
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  // drawWidth = the pixel width of the drawing area (excluding labels), scaled by zoom
+  const drawWidth = containerWidth > 0
+    ? (containerWidth - labelWidth) * zoomLevel
+    : undefined;
+
+  // Reset zoom when switching clips
+  useEffect(() => {
+    setZoomLevel(1);
+  }, [clip.id]);
+
+  const handleZoomChange = useCallback((newZoom: number) => {
+    setZoomLevel(newZoom);
+  }, []);
+
+  // Auto-scroll to keep playhead visible during playback
+  useEffect(() => {
+    if (playbackState !== 'playing' || zoomLevel <= 1) return;
+    const container = scrollContainerRef.current;
+    if (!container || containerWidth <= 0) return;
+
+    const baseDrawWidth = containerWidth - labelWidth;
+    const pxPerTick = (baseDrawWidth / totalTicks) * zoomLevel;
+    const beatsPerSecond = clip.bpm / 60;
+    const ticksPerSecond = beatsPerSecond * clip.gesture.ticks_per_beat;
+    const playheadX = labelWidth + playbackTime * ticksPerSecond * pxPerTick;
+
+    const viewLeft = container.scrollLeft;
+    const viewRight = viewLeft + containerWidth;
+
+    // Scroll when playhead exits the visible viewport
+    if (playheadX < viewLeft + labelWidth || playheadX > viewRight - 40) {
+      container.scrollLeft = playheadX - containerWidth / 3;
+    }
+  }, [playbackTime, playbackState, zoomLevel, containerWidth, totalTicks, clip.bpm, clip.gesture.ticks_per_beat, labelWidth]);
+
   // Handle inline chord editing from chord bar
   const handleChordBarEdit = useCallback(
     (startTick: number, endTick: number, newSymbol: string) => {
@@ -142,24 +199,52 @@ export function ClipDetail({
           >
             ✂
           </button>
+          <div className="mc-zoom-controls">
+            <button
+              className="mc-btn--tool"
+              onClick={() => setZoomLevel(z => Math.max(1, z / 1.3))}
+              disabled={zoomLevel <= 1}
+              title="Zoom out"
+            >
+              −
+            </button>
+            <span
+              className="mc-zoom-label"
+              title="Double-click to reset zoom"
+              onDoubleClick={() => setZoomLevel(1)}
+            >
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            <button
+              className="mc-btn--tool"
+              onClick={() => setZoomLevel(z => Math.min(10, z * 1.3))}
+              disabled={zoomLevel >= 10}
+              title="Zoom in"
+            >
+              +
+            </button>
+          </div>
         </div>
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
-          <>
           <LeadsheetInput
             value={clip.leadsheet?.inputText ?? ''}
             numBars={clip.gesture.num_bars}
             onSubmit={onLeadsheetChange ?? (() => {})}
             harmonic={clip.harmonic}
           />
-          {clip.leadsheet && clip.leadsheet.bars.length > 0 && (
+        )}
+        <div
+          ref={scrollContainerRef}
+          className="mc-piano-roll-scroll"
+        >
+        {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && clip.leadsheet && clip.leadsheet.bars.length > 0 && (
             <LeadsheetBar
               leadsheet={clip.leadsheet}
               ticksPerBar={clip.gesture.ticks_per_bar}
               totalTicks={totalTicks}
               numBars={clip.gesture.num_bars}
+              drawWidth={drawWidth}
             />
-          )}
-          </>
         )}
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
           <ChordBar
@@ -167,6 +252,7 @@ export function ClipDetail({
             ticksPerBar={clip.gesture.ticks_per_bar}
             ticksPerBeat={clip.gesture.ticks_per_beat}
             totalTicks={totalTicks}
+            drawWidth={drawWidth}
             selectionRange={selectionRange}
             onSegmentClick={(startTick, endTick) => onRangeSelect({ startTick, endTick })}
             onChordEdit={handleChordBarEdit}
@@ -178,6 +264,8 @@ export function ClipDetail({
           playbackTime={playbackTime}
           isPlaying={playbackState === 'playing'}
           height={240}
+          zoomLevel={zoomLevel}
+          onZoomChange={handleZoomChange}
           selectionRange={selectionRange}
           onRangeSelect={onRangeSelect}
           scissorsMode={scissorsMode}
@@ -186,6 +274,7 @@ export function ClipDetail({
           onBoundaryRemove={onRemoveBoundary}
           onBoundaryMove={onMoveBoundary}
         />
+        </div>
       </div>
 
       <StatsGrid

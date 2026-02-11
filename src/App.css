@@ -1151,3 +1151,42 @@ body {
   border-top: none;
   border-radius: 0 0 4px 4px;
 }
+
+/* ─── Zoom controls ─────────────────────────────────────────────── */
+
+.mc-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.mc-zoom-label {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--mc-text-muted);
+  min-width: 38px;
+  text-align: center;
+  cursor: default;
+  user-select: none;
+}
+
+.mc-zoom-controls .mc-btn--tool {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.mc-zoom-controls .mc-btn--tool:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ─── Piano roll scroll container ──────────────────────────────── */
+
+.mc-piano-roll-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 6px;
+}
