@@ -25,15 +25,34 @@ export function ClipCard({ clip, isSelected, onClick }: ClipCardProps) {
       ? `?? [${[...new Set(clip.harmonic.pitchClasses)].sort((a, b) => a - b).join(',')}]`
       : null;
 
+  // Keyboard handler for Enter/Space
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
+  // Build accessible label
+  const variantInfo = clip.source ? ', variant of another clip' : '';
+  const densityInfo = densityMatch ? `, density multiplier ${densityMatch[1]}x` : '';
+  const chordInfo = chordDisplay ? `, chord: ${chordDisplay}` : '';
+  const ariaLabel = `${clip.filename}${variantInfo}, ${clip.bpm} BPM, density ${clip.gesture.density.toFixed(1)}${densityInfo}${chordInfo}${isSelected ? ', selected' : ''}`;
+
   return (
     <div
       ref={ref}
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      aria-pressed={isSelected}
       className={`mc-clip-card ${isSelected ? 'mc-clip-card--selected' : ''}`}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
     >
       <div className="mc-clip-card-name">
         {clip.filename}
-        {clip.source && <span className="mc-clip-card-variant-dot">&#x25CF;</span>}
+        {clip.source && <span className="mc-clip-card-variant-dot" aria-hidden="true">&#x25CF;</span>}
       </div>
       <div className="mc-clip-card-meta">
         {clip.bpm} BPM &bull; {clip.gesture.density.toFixed(1)} density

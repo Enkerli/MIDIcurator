@@ -64,6 +64,94 @@ body {
   color: var(--mc-text);
 }
 
+/* ─── Focus Indicators (WCAG 2.4.7) ───────────────────────────── */
+
+*:focus {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: 2px;
+}
+
+.mc-btn:focus-visible,
+.mc-transport-btn:focus-visible,
+.mc-btn--tool:focus-visible {
+  outline: 2px solid var(--mc-accent-light);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(106, 154, 186, 0.2);
+}
+
+.mc-clip-card:focus-visible {
+  outline: 2px solid var(--mc-accent);
+  box-shadow: 0 0 0 4px rgba(106, 154, 186, 0.3);
+}
+
+.mc-chord-input:focus-visible,
+.mc-tag-input:focus-visible,
+.mc-filter-input:focus-visible,
+.mc-leadsheet-input:focus-visible {
+  outline: 2px solid var(--mc-accent);
+  border-color: var(--mc-accent);
+}
+
+:root[data-theme="dark"] *:focus-visible {
+  outline-color: var(--mc-accent-light);
+}
+
+.mc-piano-roll-container:focus-within {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: -2px;
+}
+
+/* ─── Screen Reader Utilities ─────────────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.sr-only-focusable:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: initial;
+  margin: initial;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* ─── Error Messages ──────────────────────────────────────────── */
+
+.mc-error-message {
+  font-size: 11px;
+  color: var(--mc-danger);
+  margin-top: 4px;
+  display: block;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Layout */
 .mc-app {
   display: flex;

@@ -32,6 +32,7 @@ export function MidiCurator() {
   const [densityMultiplier, setDensityMultiplier] = useState(1.0);
   const [selectionRange, setSelectionRange] = useState<TickRange | null>(null);
   const [scissorsMode, setScissorsMode] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
@@ -109,6 +110,7 @@ export function MidiCurator() {
     }
 
     refreshClips();
+    setAnnouncement('Generated 5 variants with different densities');
   }, [selectedClip, db, refreshClips]);
 
   const generateSingleVariant = useCallback(async () => {
@@ -137,6 +139,7 @@ export function MidiCurator() {
 
     await db.addClip(variant);
     refreshClips();
+    setAnnouncement(`Generated 1 variant with density ${actualDensity}`);
   }, [selectedClip, db, densityMultiplier, refreshClips]);
 
   const handleFileUpload = useCallback(async (files: File[]) => {
@@ -760,6 +763,15 @@ export function MidiCurator() {
 
   return (
     <div className="mc-app">
+      {/* Live region for accessibility announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </div>
       <div className="mc-layout">
         <Sidebar
           clips={filteredClips}

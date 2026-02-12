@@ -175,25 +175,47 @@ export function StatsGrid({
             <input
               type="number"
               className="mc-bpm-input"
+              aria-label="Edit tempo in beats per minute"
               value={bpmValue}
               onChange={(e) => onBpmChange(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && onBpmSave()}
               autoFocus
             />
-            <button className="mc-bpm-save" onClick={onBpmSave}>
+            <button
+              className="mc-bpm-save"
+              onClick={onBpmSave}
+              aria-label="Save tempo"
+            >
               &#x2713;
             </button>
           </div>
         ) : (
-          <div className="mc-stat-value mc-stat-value--editable" onClick={onStartEditBpm}>
+          <div
+            className="mc-stat-value mc-stat-value--editable"
+            onClick={onStartEditBpm}
+            role="button"
+            tabIndex={0}
+            aria-label={`Tempo: ${clip.bpm} BPM. Click to edit.`}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onStartEditBpm();
+              }
+            }}
+          >
             {clip.bpm}
-            <span className="mc-stat-edit-icon">&#x270E;</span>
+            <span className="mc-stat-edit-icon" aria-hidden="true">&#x270E;</span>
           </div>
         )}
       </div>
       <div className="mc-stat-box">
         <div className="mc-stat-label">{chordLabel}</div>
-        <div className="mc-stat-value mc-stat-value--chord">
+        <div
+          className="mc-stat-value mc-stat-value--chord"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {chordDisplayText}
         </div>
         {effectiveChordInfo.chord ? (
@@ -204,6 +226,7 @@ export function StatsGrid({
               <button
                 className="mc-btn--tag-chord"
                 onClick={onOverrideChord}
+                aria-label={`Set bar chord to ${effectiveChordInfo.chord.symbol}`}
                 title={`Set bar chord to "${effectiveChordInfo.chord.symbol}"`}
               >
                 Set
@@ -223,6 +246,8 @@ export function StatsGrid({
               type="text"
               className={`mc-chord-input ${chordInput && !isInputValid ? 'mc-chord-input--invalid' : ''} ${chordInput && isInputValid ? 'mc-chord-input--valid' : ''}`}
               placeholder="New chord (e.g., Am)"
+              aria-label="Enter chord symbol for substitution"
+              aria-invalid={chordInput.trim() !== '' && !isInputValid}
               value={chordInput}
               onChange={(e) => setChordInput(e.target.value)}
               onKeyDown={handleInputKeyDown}
@@ -231,10 +256,16 @@ export function StatsGrid({
               className="mc-btn--adapt-chord"
               onClick={handleAdaptClick}
               disabled={!isInputValid}
-              title={isInputValid ? `Adapt notes to ${parsedInputChord!.symbol}` : 'Enter a valid chord symbol'}
+              aria-label={isInputValid && parsedInputChord ? `Adapt notes to ${parsedInputChord.symbol}` : 'Enter a valid chord symbol'}
+              title={isInputValid && parsedInputChord ? `Adapt notes to ${parsedInputChord.symbol}` : 'Enter a valid chord symbol'}
             >
               Adapt
             </button>
+            {chordInput.trim() !== '' && !isInputValid && (
+              <span className="mc-error-message" role="alert">
+                Invalid chord symbol. Try: C, Am, Dm7, G7, etc.
+              </span>
+            )}
           </div>
         )}
       </div>

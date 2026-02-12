@@ -62,6 +62,7 @@ export function Sidebar({
         type="text"
         className="mc-filter-input"
         placeholder="Filter clips..."
+        aria-label="Filter clips by tag or name"
         value={filterTag}
         onChange={(e) => onFilterChange(e.target.value)}
       />
@@ -71,10 +72,18 @@ export function Sidebar({
         <span className="mc-clip-count-actions">
           {clips.length > 0 && (
             <>
-              <button className="mc-btn--download-all" onClick={onDownloadAll}>
+              <button
+                className="mc-btn--download-all"
+                onClick={onDownloadAll}
+                aria-label={`Download all ${clips.length} clips as ZIP file`}
+              >
                 Download All
               </button>
-              <button className="mc-btn--clear-all" onClick={onClearAll}>
+              <button
+                className="mc-btn--clear-all"
+                onClick={onClearAll}
+                aria-label={`Clear all ${clips.length} clips from library`}
+              >
                 Clear All
               </button>
             </>

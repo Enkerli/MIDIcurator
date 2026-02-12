@@ -18,12 +18,23 @@ export function DropZone({ onFilesDropped, fileInputRef }: DropZoneProps) {
     onFilesDropped(files);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInputRef.current?.click();
+    }
+  };
+
   return (
     <div
       className="mc-dropzone"
+      role="button"
+      tabIndex={0}
+      aria-label="Drop MIDI files or click to browse"
       onDrop={handleDrop}
       onDragOver={(e) => e.preventDefault()}
       onClick={() => fileInputRef.current?.click()}
+      onKeyDown={handleKeyDown}
     >
       <div className="mc-dropzone-main">Drop MIDI files here</div>
       <div className="mc-dropzone-sub">or click to browse</div>

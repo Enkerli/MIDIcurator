@@ -29,6 +29,7 @@ export function ThemeToggle() {
       className="mc-theme-toggle"
       onClick={toggle}
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
     >
       {theme === 'dark' ? '☀' : '☾'}
     </button>

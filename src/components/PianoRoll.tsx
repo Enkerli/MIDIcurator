@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import type { Clip } from '../types/clip';
 import {
   computeLayout,
@@ -76,6 +76,18 @@ function getThemeColors(): {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 
+/**
+ * Generate a text description of notes for screen readers.
+ * Returns a summary string listing unique notes present in the clip.
+ */
+function generateNoteDescriptions(clip: Clip): string {
+  const uniquePitches = [...new Set(clip.harmonic.pitches)].sort((a, b) => a - b);
+  if (uniquePitches.length === 0) return 'No notes';
+
+  const noteNames = uniquePitches.map(p => noteName(p)).join(', ');
+  return `${uniquePitches.length} unique notes: ${noteNames}`;
+}
+
 export function PianoRoll({
   clip,
   playbackTime,
@@ -107,6 +119,11 @@ export function PianoRoll({
   const isDraggingBoundary = useRef(false);
   const draggingBoundaryTick = useRef<number | null>(null);
   const draggingBoundaryCurrentTick = useRef<number | null>(null);
+
+  // Keyboard navigation state
+  const [keyboardMode, setKeyboardMode] = useState<'none' | 'selection' | 'scissors'>('none');
+  const [keyboardCursor, setKeyboardCursor] = useState(0); // Tick position
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
 
   const draw = useCallback(
     (canvas: HTMLCanvasElement, containerWidth: number) => {
@@ -249,6 +266,48 @@ export function PianoRoll({
         ctx.stroke();
       }
 
+      // ─── Keyboard navigation cursors ────────────────────────────────
+
+      // Selection mode cursor (blue dashed line)
+      if (keyboardMode === 'selection') {
+        const cx = layout.labelWidth + keyboardCursor * layout.pxPerTick;
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Top indicator
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.9)';
+        ctx.font = 'bold 11px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('↕', cx, 2);
+      }
+
+      // Scissors mode cursor (orange dashed line with scissors icon)
+      if (keyboardMode === 'scissors') {
+        const cx = layout.labelWidth + keyboardCursor * layout.pxPerTick;
+        ctx.strokeStyle = 'rgba(232, 135, 42, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Top indicator (scissors emoji)
+        ctx.fillStyle = 'rgba(232, 135, 42, 0.9)';
+        ctx.font = '14px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('✂', cx, 0);
+      }
+
       // Playhead
       if (isPlaying && playbackTime > 0) {
         const px = timeToX(
@@ -267,7 +326,7 @@ export function PianoRoll({
         }
       }
     },
-    [clip, playbackTime, isPlaying, height, zoomLevel, selectionRange, scissorsMode, boundaries],
+    [clip, playbackTime, isPlaying, height, zoomLevel, selectionRange, scissorsMode, boundaries, keyboardMode, keyboardCursor],
   );
 
   // ─── Mouse handlers ─────────────────────────────────────────────────
@@ -506,6 +565,119 @@ export function PianoRoll({
     onZoomChange?.(next);
   }, [zoomLevel, onZoomChange]);
 
+  // ─── Keyboard Navigation ────────────────────────────────────────────
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const layout = layoutRef.current;
+    if (!layout) return;
+
+    const ticksPerBeat = clip.gesture.ticks_per_beat;
+    const totalTicks = clip.gesture.num_bars * clip.gesture.ticks_per_bar;
+
+    // Shift+S: Toggle selection mode (only when not in scissors mode via parent)
+    if (e.key === 'S' && e.shiftKey && !scissorsMode) {
+      e.preventDefault();
+      if (keyboardMode === 'selection') {
+        setKeyboardMode('none');
+        setKeyboardCursor(0);
+        setSelectionAnchor(null);
+        onRangeSelect(null);
+      } else {
+        setKeyboardMode('selection');
+        setKeyboardCursor(0);
+        setSelectionAnchor(null);
+      }
+      return;
+    }
+
+    // Escape: Exit keyboard navigation mode
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setKeyboardMode('none');
+      setKeyboardCursor(0);
+      setSelectionAnchor(null);
+      if (!scissorsMode) onRangeSelect(null);
+      return;
+    }
+
+    // Arrow Left/Right: Move cursor
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+
+      // If scissors mode is active (from parent), enable scissors keyboard mode
+      const activeMode = scissorsMode && keyboardMode === 'none' ? 'scissors' : keyboardMode;
+      if (activeMode === 'none' && scissorsMode) {
+        setKeyboardMode('scissors');
+        setKeyboardCursor(0);
+      }
+
+      const step = ticksPerBeat / 2; // Move by eighth notes
+      const direction = e.key === 'ArrowLeft' ? -1 : 1;
+      const newCursor = Math.max(0, Math.min(totalTicks, keyboardCursor + direction * step));
+      setKeyboardCursor(newCursor);
+
+      // Shift+Arrow: Extend selection in selection mode
+      if (e.shiftKey && keyboardMode === 'selection') {
+        if (selectionAnchor === null) {
+          setSelectionAnchor(keyboardCursor);
+        }
+        const start = Math.min(selectionAnchor ?? keyboardCursor, newCursor);
+        const end = Math.max(selectionAnchor ?? keyboardCursor, newCursor);
+        onRangeSelect({ startTick: start, endTick: end });
+      }
+      return;
+    }
+
+    // Enter or Space: Confirm action based on mode
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+
+      if (keyboardMode === 'selection' && selectionAnchor !== null) {
+        // Confirm selection
+        const start = Math.min(selectionAnchor, keyboardCursor);
+        const end = Math.max(selectionAnchor, keyboardCursor);
+        if (start !== end) {
+          onRangeSelect({ startTick: start, endTick: end });
+        }
+        setSelectionAnchor(null);
+      } else if (scissorsMode || keyboardMode === 'scissors') {
+        // Place boundary at cursor
+        const snappedTick = snapForScissors(
+          keyboardCursor,
+          clip.gesture.onsets,
+          clip.gesture.durations,
+          ticksPerBeat,
+          false,
+        );
+        onBoundaryAdd?.(snappedTick);
+      }
+      return;
+    }
+
+    // Delete or Backspace in scissors mode: Remove nearest boundary
+    if ((e.key === 'Delete' || e.key === 'Backspace') && (scissorsMode || keyboardMode === 'scissors')) {
+      e.preventDefault();
+      if (boundaries.length > 0) {
+        // Find nearest boundary to cursor
+        const nearest = boundaries.reduce((closest, tick) =>
+          Math.abs(tick - keyboardCursor) < Math.abs(closest - keyboardCursor) ? tick : closest
+        );
+        onBoundaryRemove?.(nearest);
+      }
+      return;
+    }
+  }, [
+    clip.gesture,
+    scissorsMode,
+    keyboardMode,
+    keyboardCursor,
+    selectionAnchor,
+    boundaries,
+    onRangeSelect,
+    onBoundaryAdd,
+    onBoundaryRemove,
+  ]);
+
   // Observe container width for responsive sizing
   useEffect(() => {
     const container = containerRef.current;
@@ -528,17 +700,49 @@ export function PianoRoll({
     return () => observer.disconnect();
   }, [draw]);
 
+  // Generate dynamic aria-label based on mode
+  const ariaLabel = useMemo(() => {
+    const noteDesc = generateNoteDescriptions(clip);
+    const bars = clip.gesture.num_bars;
+    const bpm = clip.bpm;
+
+    if (keyboardMode === 'selection') {
+      return `Piano roll: ${bars} bars, ${bpm} BPM. Selection mode active. Use Arrow keys to move cursor, Shift+Arrow to select range, Enter to confirm, Escape to exit. ${noteDesc}`;
+    } else if (scissorsMode || keyboardMode === 'scissors') {
+      return `Piano roll: ${bars} bars, ${bpm} BPM. Scissors mode active. Use Arrow keys to position cursor, Enter or Space to place boundary, Delete to remove nearest boundary, Escape to exit. ${noteDesc}`;
+    } else {
+      return `Piano roll: ${bars} bars, ${bpm} BPM. Press Shift+S to enter selection mode for keyboard navigation. Use mouse to drag select notes or click to place scissor boundaries. ${noteDesc}`;
+    }
+  }, [clip, scissorsMode, keyboardMode]);
+
+  // Generate detailed note list for aria-describedby (screen reader only)
+  const noteListId = `piano-roll-notes-${clip.id}`;
+  const noteListContent = useMemo(() => {
+    const uniquePitches = [...new Set(clip.harmonic.pitches)].sort((a, b) => b - a);
+    return uniquePitches.map(p => noteName(p)).join(', ');
+  }, [clip.harmonic.pitches, clip.id]);
+
   return (
     <div ref={containerRef} className="mc-piano-roll-container">
+      {/* Hidden div with note details for screen readers */}
+      <div id={noteListId} className="sr-only">
+        Notes in pattern: {noteListContent}
+      </div>
+
       <canvas
         ref={canvasRef}
         className={`mc-piano-roll-canvas ${scissorsMode ? 'mc-piano-roll-canvas--scissors' : ''}`}
+        role="img"
+        aria-label={ariaLabel}
+        aria-describedby={noteListId}
+        tabIndex={0}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
         onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
       />
     </div>
   );
