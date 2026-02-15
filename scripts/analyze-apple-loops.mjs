@@ -61,7 +61,8 @@ function extractChordEventsFromSequ(data, beatsPerBar) {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const RECORD_SIZE = 30;
 
-  for (let off = 0; off + RECORD_SIZE <= data.length; off += 2) {
+  // Scan every byte position (events may not be 2-byte aligned from payload start)
+  for (let off = 0; off + RECORD_SIZE <= data.length; off++) {
     const type = view.getUint16(off);
     if (type !== 103) continue;
 
@@ -170,6 +171,12 @@ function parseAiff(arrayBuffer) {
       if (extracted && !midi) {
         midi = extracted;
       }
+    }
+
+    // Top-level Sequ chunk (found in some user-generated Apple Loops)
+    if (chunk.id === 'Sequ') {
+      const events = extractChordEventsFromSequ(chunk.data, beatsPerBar);
+      allChordEvents.push(...events);
     }
 
     if (chunk.id === 'APPL') {

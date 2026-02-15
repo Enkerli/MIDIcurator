@@ -104,7 +104,7 @@ function decodeBe22(be22: number, beatsPerBar: number): number {
 
 /**
  * Scan a Sequ payload for chord events (type == 103).
- * Scans every 2-byte-aligned position looking for type-103 records.
+ * Scans every byte position looking for type-103 records.
  */
 function extractChordEventsFromSequ(
   data: Uint8Array,
@@ -114,8 +114,9 @@ function extractChordEventsFromSequ(
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const RECORD_SIZE = 30;
 
-  // Scan for type==103 records at every 2-byte boundary
-  for (let off = 0; off + RECORD_SIZE <= data.length; off += 2) {
+  // Scan for type==103 records at every byte position
+  // (events may not be 2-byte aligned from the payload start due to variable-length headers)
+  for (let off = 0; off + RECORD_SIZE <= data.length; off++) {
     const type = view.getUint16(off);
     if (type !== 103) continue;
 
@@ -253,6 +254,12 @@ function parseAiff(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
       if (extracted && !midi) {
         midi = extracted;
       }
+    }
+
+    // Top-level Sequ chunk (found in some user-generated Apple Loops)
+    if (chunk.id === 'Sequ') {
+      const events = extractChordEventsFromSequ(chunk.data, beatsPerBar);
+      allChordEvents.push(...events);
     }
 
     // Apple Loops metadata in APPL chunks
