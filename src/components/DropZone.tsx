@@ -30,19 +30,19 @@ export function DropZone({ onFilesDropped, fileInputRef }: DropZoneProps) {
       className="mc-dropzone"
       role="button"
       tabIndex={0}
-      aria-label="Drop MIDI files or click to browse"
+      aria-label="Drop MIDI or Apple Loop files, or click to browse"
       onDrop={handleDrop}
       onDragOver={(e) => e.preventDefault()}
       onClick={() => fileInputRef.current?.click()}
       onKeyDown={handleKeyDown}
     >
-      <div className="mc-dropzone-main">Drop MIDI files here</div>
+      <div className="mc-dropzone-main">Drop MIDI / Apple Loop files here</div>
       <div className="mc-dropzone-sub">or click to browse</div>
       <input
         ref={fileInputRef as InputRef}
         type="file"
         multiple
-        accept=".mid,.midi"
+        accept=".mid,.midi,.aif,.aiff,.caf"
         onChange={handleFileInputChange}
         style={{ display: 'none' }}
       />

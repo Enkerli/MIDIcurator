@@ -4,6 +4,7 @@ import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
 import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcuratorSegments } from '../lib/midi-parser';
+import { isAppleLoopFile, parseAppleLoop, formatChordTimeline } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
@@ -142,92 +143,144 @@ export function MidiCurator() {
     setAnnouncement(`Generated 1 variant with density ${actualDensity}`);
   }, [selectedClip, db, densityMultiplier, refreshClips]);
 
+  /**
+   * Import a single MIDI ArrayBuffer into the database.
+   * Shared by direct .mid import and Apple Loops extraction.
+   *
+   * @param midiBuffer  Raw SMF bytes
+   * @param filename    Display filename for the clip
+   * @param extraTags   Additional tags to apply (e.g. "apple-loop")
+   * @param extraNotes  Extra notes string for the clip
+   */
+  const importMidiBuffer = useCallback(async (
+    midiBuffer: ArrayBuffer,
+    filename: string,
+    extraTags: string[] = [],
+    extraNotes: string = '',
+  ) => {
+    if (!db) return;
+
+    const midiData = parseMIDI(midiBuffer);
+    const notes = extractNotes(midiData);
+
+    if (notes.length === 0) return;
+
+    let bpm: number | null = null;
+    const bpmMatch = filename.match(/(\d+)[-_\s]?bpm/i);
+    if (bpmMatch) {
+      bpm = parseInt(bpmMatch[1]!);
+    }
+    if (!bpm) {
+      bpm = extractBPM(midiData);
+    }
+
+    const timeSig = extractTimeSignature(midiData);
+    const gesture = extractGesture(notes, midiData.ticksPerBeat, timeSig);
+    const harmonic = extractHarmonic(notes, gesture);
+
+    // Extract MCURATOR segmentation metadata (if present)
+    const mcurator = extractMcuratorSegments(midiData);
+    let segmentation: Segmentation | undefined;
+    if (mcurator && mcurator.boundaries.length > 0) {
+      const clipEndTick = gesture.num_bars * gesture.ticks_per_bar;
+      const segResults = detectChordsForSegments(
+        harmonic.pitches,
+        gesture.onsets,
+        gesture.durations,
+        mcurator.boundaries,
+        clipEndTick,
+      );
+      const segmentChords: SegmentChordInfo[] = segResults.map(sr => ({
+        index: sr.index,
+        startTick: sr.startTick,
+        endTick: sr.endTick,
+        chord: toDetectedChord(sr.chord),
+        pitchClasses: sr.pitchClasses,
+      }));
+      segmentation = { boundaries: mcurator.boundaries, segmentChords };
+    }
+
+    // Restore leadsheet from MCURATOR metadata (if present)
+    let leadsheet: Leadsheet | undefined;
+    if (mcurator?.leadsheetText) {
+      leadsheet = parseLeadsheet(mcurator.leadsheetText, gesture.num_bars);
+    }
+
+    const clipNotes = [mcurator?.clipNotes, extraNotes].filter(Boolean).join('; ');
+
+    const clip: Clip = {
+      id: crypto.randomUUID(),
+      filename,
+      imported_at: Date.now(),
+      bpm,
+      gesture,
+      harmonic,
+      rating: null,
+      notes: clipNotes,
+      sourceFilename: mcurator?.variantOf,
+      segmentation,
+      leadsheet,
+    };
+
+    await db.addClip(clip);
+
+    // Auto-tag: clips with ≤5 distinct pitch classes likely contain
+    // a single chord.  Tag with "single-chord" and the chord symbol.
+    const uniquePcs = new Set(harmonic.pitchClasses);
+    if (uniquePcs.size <= 5 && uniquePcs.size >= 2) {
+      await db.addTag(clip.id, 'single-chord');
+      if (harmonic.detectedChord?.symbol) {
+        await db.addTag(clip.id, harmonic.detectedChord.symbol);
+      }
+    }
+
+    // Apply extra tags (e.g. "apple-loop")
+    for (const tag of extraTags) {
+      await db.addTag(clip.id, tag);
+    }
+  }, [db]);
+
   const handleFileUpload = useCallback(async (files: File[]) => {
     if (!db) return;
 
     for (const file of files) {
-      if (!file.name.match(/\.mid$/i)) continue;
       try {
-        const arrayBuffer = await file.arrayBuffer();
-        const midiData = parseMIDI(arrayBuffer);
-        const notes = extractNotes(midiData);
+        // ── Apple Loops files (.aif, .aiff, .caf) ──────────────────
+        if (isAppleLoopFile(file.name)) {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = parseAppleLoop(arrayBuffer);
 
-        if (notes.length === 0) continue;
-
-        let bpm: number | null = null;
-        const bpmMatch = file.name.match(/(\d+)[-_\s]?bpm/i);
-        if (bpmMatch) {
-          bpm = parseInt(bpmMatch[1]!);
-        }
-        if (!bpm) {
-          bpm = extractBPM(midiData);
-        }
-
-        const timeSig = extractTimeSignature(midiData);
-        const gesture = extractGesture(notes, midiData.ticksPerBeat, timeSig);
-        const harmonic = extractHarmonic(notes, gesture);
-
-        // Extract MCURATOR segmentation metadata (if present)
-        const mcurator = extractMcuratorSegments(midiData);
-        let segmentation: Segmentation | undefined;
-        if (mcurator && mcurator.boundaries.length > 0) {
-          // Recompute segment chords from the restored boundaries
-          const clipEndTick = gesture.num_bars * gesture.ticks_per_bar;
-          const segResults = detectChordsForSegments(
-            harmonic.pitches,
-            gesture.onsets,
-            gesture.durations,
-            mcurator.boundaries,
-            clipEndTick,
-          );
-          const segmentChords: SegmentChordInfo[] = segResults.map(sr => ({
-            index: sr.index,
-            startTick: sr.startTick,
-            endTick: sr.endTick,
-            chord: toDetectedChord(sr.chord),
-            pitchClasses: sr.pitchClasses,
-          }));
-          segmentation = { boundaries: mcurator.boundaries, segmentChords };
-        }
-
-        // Restore leadsheet from MCURATOR metadata (if present)
-        let leadsheet: Leadsheet | undefined;
-        if (mcurator?.leadsheetText) {
-          leadsheet = parseLeadsheet(mcurator.leadsheetText, gesture.num_bars);
-        }
-
-        const clip: Clip = {
-          id: crypto.randomUUID(),
-          filename: file.name,
-          imported_at: Date.now(),
-          bpm,
-          gesture,
-          harmonic,
-          rating: null,
-          notes: mcurator?.clipNotes ?? '',
-          sourceFilename: mcurator?.variantOf,
-          segmentation,
-          leadsheet,
-        };
-
-        await db.addClip(clip);
-
-        // Auto-tag: clips with ≤5 distinct pitch classes likely contain
-        // a single chord.  Tag with "single-chord" and the chord symbol.
-        const uniquePcs = new Set(harmonic.pitchClasses);
-        if (uniquePcs.size <= 5 && uniquePcs.size >= 2) {
-          await db.addTag(clip.id, 'single-chord');
-          if (harmonic.detectedChord?.symbol) {
-            await db.addTag(clip.id, harmonic.detectedChord.symbol);
+          if (!result.midi) {
+            console.warn('Apple Loop has no embedded MIDI:', file.name);
+            continue;
           }
+
+          // Build a .mid filename from the loop filename
+          const baseName = file.name.replace(/\.(aif|aiff|caf)$/i, '');
+          const midiFilename = `${baseName}.mid`;
+
+          // Build extra notes with chord timeline (if chord events found)
+          let extraNotes = `Source: Apple Loop (${result.format.toUpperCase()})`;
+          if (result.chordEvents.length > 0) {
+            extraNotes += ` | Chords: ${formatChordTimeline(result.chordEvents)}`;
+          }
+
+          await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes);
+          continue;
         }
+
+        // ── Standard MIDI files (.mid) ──────────────────────────────
+        if (!file.name.match(/\.midi?$/i)) continue;
+
+        const arrayBuffer = await file.arrayBuffer();
+        await importMidiBuffer(arrayBuffer, file.name);
       } catch (error) {
         console.error('Error importing', file.name, error);
       }
     }
 
     refreshClips();
-  }, [db, refreshClips]);
+  }, [db, refreshClips, importMidiBuffer]);
 
   const clearAllClips = useCallback(async () => {
     if (!db) return;
