@@ -353,6 +353,13 @@ export function ClipDetail({
       </div>
 
       <VariantInfo clip={clip} sourceClip={sourceClip} />
+
+      {clip.notes && (
+        <div className="mc-clip-notes">
+          <strong>Notes:</strong>
+          <div className="mc-clip-notes-content">{clip.notes}</div>
+        </div>
+      )}
     </div>
   );
 }

@@ -635,6 +635,27 @@ body {
   font-size: 13px;
 }
 
+/* Clip notes (Apple Loop metadata, etc.) */
+.mc-clip-notes {
+  margin-top: 20px;
+  padding: 15px;
+  background: var(--mc-bg-card);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.mc-clip-notes strong {
+  font-weight: 600;
+  color: var(--mc-text-label);
+}
+
+.mc-clip-notes-content {
+  margin-top: 8px;
+  color: var(--mc-text-muted);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .mc-variant-info strong {
   font-weight: 600;
 }
