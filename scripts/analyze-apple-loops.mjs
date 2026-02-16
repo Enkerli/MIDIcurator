@@ -49,7 +49,8 @@ function decodeRootNote(b8, b9) {
 }
 
 function decodeBe22(be22, beatsPerBar) {
-  const norm = (be22 >>> 0) / 65536.0;
+  const hi16 = (be22 >>> 16) & 0xFFFF;  // Use high 16 bits only
+  const norm = hi16 / 65536.0;
   let pos = (1.0 - norm) * beatsPerBar;
   pos = ((pos % beatsPerBar) + beatsPerBar) % beatsPerBar;
   return pos;
