@@ -5,6 +5,8 @@
  * Based on reverse-engineering documented in docs/APPLE_LOOPS_REVERSE_ENGINEERING.md
  */
 
+import { detectChordFromPcs } from './chord-detect';
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 /** A chord event extracted from a Sequ payload (type 103). */
@@ -596,9 +598,6 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
     .map((e) => {
       if (e.rootName && e.rootPc !== undefined) {
         // We have a decoded root - format as chord symbol
-        // Import chord detection here to avoid circular dependency
-        const { detectChordFromPcs } = require('./chord-detect');
-
         // Convert intervals to absolute pitch classes
         const absolutePcs = e.intervals.map((interval) => (e.rootPc! + interval) % 12);
 
@@ -615,8 +614,6 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
       }
 
       // No root decoded - try to detect chord quality from intervals alone
-      const { detectChordFromPcs } = require('./chord-detect');
-
       // Try with root assumed to be 0 (C)
       const match = detectChordFromPcs(e.intervals);
 
