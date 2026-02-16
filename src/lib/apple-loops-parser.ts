@@ -505,19 +505,19 @@ export function parseAppleLoop(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
  * Uses the most common pitch class in the MIDI data as the root.
  *
  * @param events Chord events to enrich
- * @param midiNotes Array of MIDI note objects with pitch and tick properties
+ * @param midiNotes Array of MIDI note objects with midi and ticks properties
  * @returns Events with inferred roots added
  */
 export function enrichChordEventsWithMidiRoots(
   events: AppleLoopChordEvent[],
-  midiNotes: Array<{ pitch: number; tick: number }>,
+  midiNotes: Array<{ midi: number; ticks: number }>,
 ): AppleLoopChordEvent[] {
   if (midiNotes.length === 0) return events;
 
   // Count pitch class occurrences
   const pcCounts = new Map<number, number>();
   for (const note of midiNotes) {
-    const pc = note.pitch % 12;
+    const pc = note.midi % 12;
     pcCounts.set(pc, (pcCounts.get(pc) || 0) + 1);
   }
 
