@@ -6,6 +6,7 @@
  */
 
 import { findQualityByIntervals } from './chord-dictionary';
+import type { DetectedChord, Leadsheet, LeadsheetBar, LeadsheetChord } from '../types/clip';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -19,76 +20,42 @@ export interface AppleLoopChordEvent {
   positionBeats: number;
   /** Raw be22 field (for debugging / future use). */
   rawBe22: number;
-  /** Raw b8 field (encodes accidental: 1=flat, 2=natural, 3=sharp, or 15=scheme 2). */
+  /** Raw b8 field (encodes accidental). */
   b8: number;
-  /** Raw b9 field (encodes pitch class 0-11 in scheme 1, or accidental hint in scheme 2). */
+  /** Raw b9 field (encodes pitch class or accidental hint). */
   b9: number;
-  /** Decoded root note name (e.g. "C", "F♯", "A♭") when b8≠15. */
+  /** Root note name (e.g. "C", "F♯") if b8/b9 scheme allows full decode. */
   rootName?: string;
-  /** Root pitch class (0-11) when b8≠15. */
+  /** Root pitch class (0-11) if b8/b9 scheme allows full decode. */
   rootPc?: number;
-  /** Accidental preference hint (1=flat, 2=natural, 3=sharp) when b8=15. */
-  accidentalHint?: number;
+  /** Accidental hint (for b8=15 scheme, where b9 encodes hint not full PC). */
+  accidentalHint?: 'flat' | 'natural' | 'sharp';
 }
 
-/** Result of parsing an Apple Loops file. */
+/** Result of parsing an Apple Loop file (AIFF or CAF). */
 export interface AppleLoopParseResult {
-  /** Extracted SMF MIDI as an ArrayBuffer, or null if not found. */
+  /** Embedded MIDI as ArrayBuffer, or null if not found. */
   midi: ArrayBuffer | null;
-  /** Chord events decoded from Sequ payloads. */
+  /** Chord events extracted from Sequ chunk. */
   chordEvents: AppleLoopChordEvent[];
-  /** Beats per bar used for position decoding (default 4). */
+  /** Beats per bar (default 4, could be parsed from meta). */
   beatsPerBar: number;
-  /** Container format detected. */
-  format: 'aiff' | 'aifc' | 'caf';
+  /** Format: "AIFF" or "CAF". */
+  format: string;
 }
 
-// ─── AIFF chunk parsing ────────────────────────────────────────────
+// ─── Helper Functions ───────────────────────────────────────────────
 
-interface IffChunk {
-  id: string;
-  data: Uint8Array;
-  offset: number;
-}
-
-/**
- * Parse IFF-style chunks from a data region.
- * Used for both top-level AIFF chunks and nested subchunks inside APPL payloads.
- */
-function parseIffChunks(data: Uint8Array, startOffset: number = 0): IffChunk[] {
-  const chunks: IffChunk[] = [];
-  let offset = startOffset;
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-  while (offset + 8 <= data.length) {
-    const id = String.fromCharCode(data[offset]!, data[offset + 1]!, data[offset + 2]!, data[offset + 3]!);
-    offset += 4;
-
-    const size = view.getUint32(offset);
-    offset += 4;
-
-    if (offset + size > data.length) break; // truncated
-
-    chunks.push({
-      id,
-      data: data.subarray(offset, offset + size),
-      offset: offset,
-    });
-
-    offset += size;
-    // AIFF chunks are padded to even boundaries
-    if (size % 2 !== 0 && offset < data.length) {
-      offset += 1;
-    }
-  }
-
-  return chunks;
+/** Check if a filename looks like an Apple Loop. */
+export function isAppleLoopFile(filename: string): boolean {
+  return /\.(aif|aiff|caf)$/i.test(filename);
 }
 
 /**
- * Decode the 12-bit interval mask into an array of semitone intervals.
+ * Decode the 12-bit interval mask into an array of pitch-class offsets.
+ * Bit 0 (LSB) → interval 0, bit 1 → interval 1, ..., bit 11 → interval 11.
  */
-export function decodeIntervalMask(mask: number): number[] {
+function decodeIntervalMask(mask: number): number[] {
   const intervals: number[] = [];
   for (let i = 0; i < 12; i++) {
     if (mask & (1 << i)) {
@@ -98,63 +65,82 @@ export function decodeIntervalMask(mask: number): number[] {
   return intervals;
 }
 
+interface RootInfo {
+  name: string;
+  pc: number;
+}
+
+interface AccidentalHintInfo {
+  accidentalHint: 'flat' | 'natural' | 'sharp';
+}
+
 /**
- * Decode root note from b8 (accidental) and b9 (pitch class or accidental hint).
+ * Decode b8 and b9 bytes into root note information.
  *
- * Two encoding schemes observed:
- *
- * **Scheme 1** (Apple first-party loops):
- * - b8 = accidental type (1=flat, 2=natural, 3=sharp)
- * - b9 = pitch class (0-11)
- *
- * **Scheme 2** (user-generated loops, b8=15):
- * - b8 = 15 (special marker indicating scheme 2)
- * - b9 = accidental preference (1=flat, 2=natural, 3=sharp)
- * - Root PC must be inferred from MIDI notes
- *
- * @returns Object with accidental hint for scheme 2, or full root for scheme 1
+ * Schemes discovered:
+ *   1. b8 ∈ {1, 2, 3} (Apple first-party): full root encoding
+ *      - b8=1 → flat, b8=2 → natural, b8=3 → sharp
+ *      - b9 = pitch class
+ *   2. b8=0x0f (15) (User-generated v1): accidental hint only
+ *      - b9 encodes accidental hint, not full PC
+ *      - Root must be inferred from MIDI notes
+ *   3. b8=0xff (255) (User-generated v2): unknown encoding
  */
 function decodeRootNote(
   b8: number,
   b9: number,
-): { name: string; pc: number } | { accidentalHint: number } | null {
-  // Scheme 2: b8=15 means user-generated loop with accidental hint in b9
-  if (b8 === 15) {
-    return { accidentalHint: b9 };
+): RootInfo | AccidentalHintInfo | null {
+  // Scheme 1: b8 ∈ {1, 2, 3} (full root encoding)
+  if (b8 === 1 || b8 === 2 || b8 === 3) {
+    const pc = b9 % 12;
+
+    // Natural notes (b8 = 2)
+    const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+    const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
+
+    if (b8 === 2) {
+      const idx = naturalPcs.indexOf(pc);
+      if (idx >= 0) {
+        return { name: naturals[idx]!, pc };
+      }
+    } else if (b8 === 3) {
+      // Sharp (b8 = 3)
+      const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
+      const sharpPcs = [1, 3, 6, 8, 10];
+      const idx = sharpPcs.indexOf(pc);
+      if (idx >= 0) {
+        return { name: sharpNames[idx]!, pc };
+      }
+    } else if (b8 === 1) {
+      // Flat (b8 = 1)
+      const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
+      const flatPcs = [1, 3, 6, 8, 10];
+      const idx = flatPcs.indexOf(pc);
+      if (idx >= 0) {
+        return { name: flatNames[idx]!, pc };
+      }
+    }
+
+    // Fallback: shouldn't reach here for valid Apple first-party data
+    return null;
   }
 
-  // Scheme 1: Standard encoding
-  const pc = b9 % 12;
-  const accidental = b8;
-
-  // Natural notes (b8 = 2)
-  const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-  const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
-
-  if (accidental === 2) {
-    // Natural
-    const idx = naturalPcs.indexOf(pc);
-    if (idx >= 0) {
-      return { name: naturals[idx]!, pc };
+  // Scheme 2: b8=0x0f (15) - accidental hint only
+  if (b8 === 0x0f || b8 === 15) {
+    // b9 encodes accidental hint
+    // Observed: b9=1 or b9=2 might encode flat/natural/sharp
+    // This is a hint; actual root must be inferred from MIDI
+    if (b9 === 0 || b9 === 2) {
+      return { accidentalHint: 'natural' };
+    } else if (b9 === 1) {
+      return { accidentalHint: 'flat' };
+    } else if (b9 === 3) {
+      return { accidentalHint: 'sharp' };
     }
-  } else if (accidental === 3) {
-    // Sharp
-    const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
-    const sharpPcs = [1, 3, 6, 8, 10];
-    const idx = sharpPcs.indexOf(pc);
-    if (idx >= 0) {
-      return { name: sharpNames[idx]!, pc };
-    }
-  } else if (accidental === 1) {
-    // Flat
-    const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
-    const flatPcs = [1, 3, 6, 8, 10];
-    const idx = flatPcs.indexOf(pc);
-    if (idx >= 0) {
-      return { name: flatNames[idx]!, pc };
-    }
+    return { accidentalHint: 'natural' }; // default
   }
 
+  // Scheme 3: b8=0xff (255) or other values - unknown
   return null;
 }
 
@@ -174,22 +160,14 @@ function decodeBe22(be22: number, beatsPerBar: number): number {
 
 /**
  * Scan a Sequ payload for chord events (type == 103).
- * Scans every byte position looking for type-103 records.
+ * Scans every 2-byte boundary looking for type-103 records.
  *
- * Record layout (32 bytes total):
- *   +0x00: u16 LE  type (103 for chord events)
- *   +0x02: u16 LE  w1
- *   +0x04: u16 LE  mask (pitch-class bitmask)
- *   +0x06: u16 LE  w3
- *   +0x08: u8      b8 (accidental/scheme marker)
- *   +0x09: u8      b9 (PC or accidental hint)
- *   +0x0A: u16     (padding/unknown)
- *   +0x0C: u16 LE  x10
- *   +0x0E: u16 LE  x12
- *   +0x10: u32 BE  be14
- *   +0x14: u32 BE  be18
- *   +0x18: u32 BE  be22 (position)
- *   +0x1C: u32 BE  be26
+ * Record structure (32 bytes):
+ *   +0x00: u16 LE type (103 for chord event)
+ *   +0x04: u16 LE mask (12-bit pitch-class bitmask)
+ *   +0x08: u8 b8 (accidental / scheme marker)
+ *   +0x09: u8 b9 (pitch class or accidental hint)
+ *   +0x18: u32 BE be22 (position, use low 16 bits)
  */
 function extractChordEventsFromSequ(
   data: Uint8Array,
@@ -242,142 +220,167 @@ function extractChordEventsFromSequ(
   return events;
 }
 
+// ─── Sequ chunk helper ──────────────────────────────────────────────
+
+interface IffChunk {
+  id: string;
+  data: Uint8Array;
+  offset: number;
+}
+
 /**
- * Scan a byte array for the SMF MThd signature.
- * Returns the offset if found, or -1.
+ * Parse IFF-style chunks from a data region.
+ * Used for both top-level AIFF chunks and nested subchunks inside APPL payloads.
  */
-function findMThd(data: Uint8Array): number {
-  // Look for "MThd" (0x4D546864)
+function parseIffChunks(data: Uint8Array, startOffset: number = 0): IffChunk[] {
+  const chunks: IffChunk[] = [];
+  let offset = startOffset;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+  while (offset + 8 <= data.length) {
+    const id = String.fromCharCode(data[offset]!, data[offset + 1]!, data[offset + 2]!, data[offset + 3]!);
+    offset += 4;
+
+    const size = view.getUint32(offset);
+    offset += 4;
+
+    if (offset + size > data.length) break;
+
+    chunks.push({
+      id,
+      data: data.subarray(offset, offset + size),
+      offset,
+    });
+
+    offset += size;
+    // AIFF chunks are word-aligned; skip padding byte if odd size
+    if (size % 2 !== 0 && offset < data.length) {
+      offset += 1;
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Recursively search for Sequ chunks in nested IFF structures.
+ * Some Apple Loops have Sequ inside APPL inside INST; others have top-level Sequ.
+ */
+function findSequChunks(chunks: IffChunk[]): Uint8Array[] {
+  const sequPayloads: Uint8Array[] = [];
+
+  for (const chunk of chunks) {
+    if (chunk.id === 'Sequ') {
+      sequPayloads.push(chunk.data);
+    }
+    // Recurse into APPL chunks which may contain nested Sequ
+    if (chunk.id === 'APPL') {
+      const nested = parseIffChunks(chunk.data);
+      sequPayloads.push(...findSequChunks(nested));
+    }
+  }
+
+  return sequPayloads;
+}
+
+// ─── MIDI extraction ────────────────────────────────────────────────
+
+/**
+ * Search for embedded MIDI data.
+ * Apple Loops may store SMF MIDI in chunks like '.mid' (AIFF) or 'midi' (CAF).
+ * Fallback: scan entire buffer for 'MThd' magic.
+ */
+function extractEmbeddedMidi(data: Uint8Array): ArrayBuffer | null {
+  // Scan for 'MThd' (MIDI header magic)
   for (let i = 0; i <= data.length - 4; i++) {
     if (
-      data[i] === 0x4D &&
+      data[i] === 0x4d &&
       data[i + 1] === 0x54 &&
       data[i + 2] === 0x68 &&
       data[i + 3] === 0x64
     ) {
-      return i;
+      // Found potential MIDI header; return from here to end (simplified extraction)
+      return data.slice(i).buffer;
     }
   }
-  return -1;
-}
-
-/**
- * Given a byte array starting at MThd, compute the total SMF size
- * by reading the header and all track chunks.
- */
-function computeSmfSize(data: Uint8Array, start: number): number {
-  const view = new DataView(data.buffer, data.byteOffset + start, data.byteLength - start);
-
-  // MThd header: 4 bytes id + 4 bytes size + 6 bytes data = 14 bytes
-  if (start + 14 > data.length) return -1;
-
-  const headerSize = view.getUint32(4);
-  let offset = 8 + headerSize; // past MThd id + size + data
-
-  const trackCount = view.getUint16(10); // format at 8, tracks at 10
-
-  for (let i = 0; i < trackCount; i++) {
-    if (start + offset + 8 > data.length) return -1;
-
-    const chunkId = String.fromCharCode(
-      data[start + offset]!,
-      data[start + offset + 1]!,
-      data[start + offset + 2]!,
-      data[start + offset + 3]!,
-    );
-
-    if (chunkId !== 'MTrk') return -1;
-
-    const trackLen = view.getUint32(offset + 4);
-    offset += 8 + trackLen;
-  }
-
-  return offset;
-}
-
-/**
- * Extract embedded SMF MIDI data from a region.
- * Searches for MThd signature and computes the full SMF extent.
- */
-function extractEmbeddedMidi(data: Uint8Array): ArrayBuffer | null {
-  const mthdOffset = findMThd(data);
-  if (mthdOffset < 0) return null;
-
-  const smfSize = computeSmfSize(data, mthdOffset);
-  if (smfSize <= 0) return null;
-
-  // Copy to a standalone ArrayBuffer
-  const midi = new ArrayBuffer(smfSize);
-  new Uint8Array(midi).set(data.subarray(mthdOffset, mthdOffset + smfSize));
-  return midi;
+  return null;
 }
 
 // ─── AIFF container ─────────────────────────────────────────────────
 
 /**
  * Parse an AIFF/AIFC file and extract Apple Loops data.
+ *
+ * AIFF structure:
+ *   File header: 'FORM' (4 bytes) + size (4 bytes BE) + 'AIFF'/'AIFC' (4 bytes)
+ *   Chunks: chunk_id (4 bytes) + size (4 bytes BE) + data
+ *
+ * Relevant chunks:
+ *   - '.mid' or similar: embedded MIDI
+ *   - 'APPL' → nested chunks may contain 'Sequ'
+ *   - 'Sequ' (top-level or nested): chord events
  */
 function parseAiff(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
   const data = new Uint8Array(arrayBuffer);
-  const view = new DataView(arrayBuffer);
 
   // Validate FORM header
-  const formTag = String.fromCharCode(data[0]!, data[1]!, data[2]!, data[3]!);
-  if (formTag !== 'FORM') {
+  const formMagic = String.fromCharCode(data[0]!, data[1]!, data[2]!, data[3]!);
+  if (formMagic !== 'FORM') {
     throw new Error('Not a valid AIFF file: missing FORM header');
   }
 
-  const formSize = view.getUint32(4);
   const formType = String.fromCharCode(data[8]!, data[9]!, data[10]!, data[11]!);
-
   if (formType !== 'AIFF' && formType !== 'AIFC') {
-    throw new Error(`Not a valid AIFF file: unexpected form type "${formType}"`);
+    throw new Error('Not a valid AIFF/AIFC file: unexpected form type');
   }
-
-  const format = formType === 'AIFC' ? 'aifc' as const : 'aiff' as const;
-
-  // Parse top-level chunks (skip FORM header: 4 id + 4 size + 4 type = 12 bytes)
-  const bodyEnd = Math.min(8 + formSize, data.length);
-  const bodyData = data.subarray(12, bodyEnd);
-  const topChunks = parseIffChunks(bodyData);
 
   let midi: ArrayBuffer | null = null;
   const allChordEvents: AppleLoopChordEvent[] = [];
-  const beatsPerBar = 4; // default; could be refined from time sig metadata
+  const beatsPerBar = 4; // Default; could parse from time sig meta
 
-  for (const chunk of topChunks) {
-    // Standard AIFF MIDI chunk
-    if (chunk.id === 'MIDI') {
+  // Parse top-level IFF chunks starting at offset 12
+  const chunks = parseIffChunks(data, 12);
+
+  // Look for MIDI and Sequ chunks
+  for (const chunk of chunks) {
+    // Check for top-level Sequ chunks (user-generated loops)
+    if (chunk.id === 'Sequ') {
+      const events = extractChordEventsFromSequ(chunk.data, beatsPerBar);
+      allChordEvents.push(...events);
+    }
+
+    // Check for '.mid' chunk (MIDI data)
+    if (chunk.id === '.mid') {
       const extracted = extractEmbeddedMidi(chunk.data);
       if (extracted && !midi) {
         midi = extracted;
       }
     }
 
-    // Top-level Sequ chunk (found in some user-generated Apple Loops)
-    if (chunk.id === 'Sequ') {
-      const events = extractChordEventsFromSequ(chunk.data, beatsPerBar);
-      allChordEvents.push(...events);
+    // Check for 'midi' chunk variant
+    if (chunk.id === 'midi') {
+      const extracted = extractEmbeddedMidi(chunk.data);
+      if (extracted && !midi) {
+        midi = extracted;
+      }
     }
 
-    // Apple Loops metadata in APPL chunks
+    // Recurse into APPL chunks for nested Sequ
     if (chunk.id === 'APPL') {
-      // Parse nested subchunks inside APPL payload
-      const subChunks = parseIffChunks(chunk.data);
-
-      for (const sub of subChunks) {
-        if (sub.id === 'Sequ') {
-          const events = extractChordEventsFromSequ(sub.data, beatsPerBar);
-          allChordEvents.push(...events);
-        }
+      const sequPayloads = findSequChunks([chunk]);
+      for (const sequ of sequPayloads) {
+        const events = extractChordEventsFromSequ(sequ, beatsPerBar);
+        allChordEvents.push(...events);
       }
 
-      // Also scan the raw APPL payload for embedded MIDI
-      // (some loops embed SMF directly in the APPL block)
-      if (!midi) {
-        const extracted = extractEmbeddedMidi(chunk.data);
-        if (extracted) {
-          midi = extracted;
+      // Also check for embedded MIDI inside APPL
+      const subChunks = parseIffChunks(chunk.data);
+      for (const sub of subChunks) {
+        if (sub.id === '.mid' || sub.id === 'midi') {
+          const extracted = extractEmbeddedMidi(sub.data);
+          if (extracted && !midi) {
+            midi = extracted;
+          }
         }
       }
     }
@@ -388,7 +391,7 @@ function parseAiff(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
     midi = extractEmbeddedMidi(data);
   }
 
-  return { midi, chordEvents: allChordEvents, beatsPerBar, format };
+  return { midi, chordEvents: allChordEvents, beatsPerBar, format: 'AIFF' };
 }
 
 // ─── CAF container ──────────────────────────────────────────────────
@@ -457,11 +460,9 @@ function parseCaf(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
       }
 
       // Also scan for embedded MIDI
-      if (!midi) {
-        const extracted = extractEmbeddedMidi(chunkData);
-        if (extracted) {
-          midi = extracted;
-        }
+      const extracted = extractEmbeddedMidi(chunkData);
+      if (extracted && !midi) {
+        midi = extracted;
       }
     }
 
@@ -473,135 +474,103 @@ function parseCaf(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
     midi = extractEmbeddedMidi(data);
   }
 
-  return { midi, chordEvents: allChordEvents, beatsPerBar, format: 'caf' };
+  return { midi, chordEvents: allChordEvents, beatsPerBar, format: 'CAF' };
 }
 
-// ─── Public API ─────────────────────────────────────────────────────
-
-/** File extensions accepted for Apple Loops. */
-export const APPLE_LOOP_EXTENSIONS = ['.aif', '.aiff', '.caf'];
+// ─── Main API ───────────────────────────────────────────────────────
 
 /**
- * Check whether a filename looks like an Apple Loops file.
- */
-export function isAppleLoopFile(filename: string): boolean {
-  const lower = filename.toLowerCase();
-  return APPLE_LOOP_EXTENSIONS.some(ext => lower.endsWith(ext));
-}
-
-/**
- * Parse an Apple Loops file (AIFF, AIFC, or CAF).
- *
- * Returns extracted MIDI data (if embedded), chord events from Sequ payloads,
- * and container format metadata.
- *
- * @throws Error if the file format is not recognized.
+ * Parse an Apple Loop file (AIFF or CAF) and extract embedded MIDI + chord metadata.
  */
 export function parseAppleLoop(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
   const data = new Uint8Array(arrayBuffer);
 
-  if (data.length < 12) {
-    throw new Error('File too small to be an Apple Loops file');
-  }
+  // Detect format by magic bytes
+  const magic = String.fromCharCode(data[0]!, data[1]!, data[2]!, data[3]!);
 
-  // Detect container by magic bytes
-  const magic4 = String.fromCharCode(data[0]!, data[1]!, data[2]!, data[3]!);
-
-  if (magic4 === 'FORM') {
+  if (magic === 'FORM') {
     return parseAiff(arrayBuffer);
-  }
-
-  if (magic4 === 'caff') {
+  } else if (magic === 'caff') {
     return parseCaf(arrayBuffer);
+  } else {
+    throw new Error(`Unsupported file format: ${magic}`);
   }
+}
 
-  throw new Error(`Unrecognized container format (magic: "${magic4}")`);
+// ─── Enrichment (for b8=15 scheme) ──────────────────────────────────
+
+interface MidiNote {
+  pitch: number;
+  start: number;
+  duration: number;
 }
 
 /**
- * Infer chord roots from MIDI notes for events that have accidentalHint.
- * Uses the most common pitch class in the MIDI data as the root.
+ * Enrich chord events that have accidental hints (b8=15) by inferring
+ * root from MIDI notes.
  *
- * @param events Chord events to enrich
- * @param midiNotes Array of MIDI note objects with midi and ticks properties
- * @returns Events with inferred roots added
+ * Strategy: For each event, find the lowest MIDI pitch within the chord block,
+ * reduce to pitch class, and spell it using the accidental hint.
  */
 export function enrichChordEventsWithMidiRoots(
   events: AppleLoopChordEvent[],
-  midiNotes: Array<{ midi: number; ticks: number }>,
+  midiNotes: MidiNote[],
 ): AppleLoopChordEvent[] {
-  if (midiNotes.length === 0) return events;
-
-  // Count pitch class occurrences
-  const pcCounts = new Map<number, number>();
-  for (const note of midiNotes) {
-    const pc = note.midi % 12;
-    pcCounts.set(pc, (pcCounts.get(pc) || 0) + 1);
-  }
-
-  // Find most common PC (likely the root/tonic)
-  let inferredRootPc = 0;
-  let maxCount = 0;
-  for (const [pc, count] of pcCounts) {
-    if (count > maxCount) {
-      maxCount = count;
-      inferredRootPc = pc;
-    }
-  }
-
-  // Apply inferred root to events with accidentalHint
   return events.map((event) => {
-    if (event.accidentalHint !== undefined && event.rootPc === undefined) {
-      // We have an accidental hint but no root - infer from MIDI
-      const rootPc = inferredRootPc;
-      const accidental = event.accidentalHint;
+    // Only enrich events with accidental hint (scheme 2)
+    if (!event.accidentalHint) return event;
 
-      // Spell the root using the accidental hint
-      const rootName = spellRootWithHint(rootPc, accidental);
+    // Find MIDI notes that overlap with this chord event
+    // (simplified: use all notes in the clip)
+    const pitches = midiNotes.map((n) => n.pitch);
+    if (pitches.length === 0) return event;
 
-      return {
-        ...event,
-        rootPc,
-        rootName,
-      };
-    }
-    return event;
+    // Get lowest pitch as root
+    const lowestPitch = Math.min(...pitches);
+    const rootPc = lowestPitch % 12;
+
+    // Spell root based on accidental hint
+    const rootName = spellRootByHint(rootPc, event.accidentalHint);
+
+    return {
+      ...event,
+      rootPc,
+      rootName,
+    };
   });
 }
 
-/**
- * Spell a root note given pitch class and accidental hint.
- */
-function spellRootWithHint(pc: number, accidentalHint: number): string {
+function spellRootByHint(
+  pc: number,
+  hint: 'flat' | 'natural' | 'sharp',
+): string {
   const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
   const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
-
-  // Try natural first
-  const natIdx = naturalPcs.indexOf(pc);
-  if (natIdx >= 0 && accidentalHint === 2) {
-    return naturals[natIdx]!;
-  }
-
-  // Sharps
-  const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
+  const sharps = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
   const sharpPcs = [1, 3, 6, 8, 10];
-  const sharpIdx = sharpPcs.indexOf(pc);
-  if (sharpIdx >= 0 && accidentalHint === 3) {
-    return sharpNames[sharpIdx]!;
-  }
-
-  // Flats
-  const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
+  const flats = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
   const flatPcs = [1, 3, 6, 8, 10];
-  const flatIdx = flatPcs.indexOf(pc);
-  if (flatIdx >= 0 && accidentalHint === 1) {
-    return flatNames[flatIdx]!;
+
+  if (hint === 'natural') {
+    const idx = naturalPcs.indexOf(pc);
+    if (idx >= 0) return naturals[idx]!;
+  } else if (hint === 'sharp') {
+    const idx = sharpPcs.indexOf(pc);
+    if (idx >= 0) return sharps[idx]!;
+  } else if (hint === 'flat') {
+    const idx = flatPcs.indexOf(pc);
+    if (idx >= 0) return flats[idx]!;
   }
 
-  // Fallback: use default spelling
-  const allNames = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
-  return allNames[pc] || '?';
+  // Fallback: use natural spelling
+  const idx = naturalPcs.indexOf(pc);
+  if (idx >= 0) return naturals[idx]!;
+
+  // Last resort: generic sharp
+  return sharps[sharpPcs.indexOf(pc)] || `PC${pc}`;
 }
+
+// ─── Formatting ─────────────────────────────────────────────────────
 
 /**
  * Convert Apple Loop chord events into a human-readable chord timeline string.
@@ -637,4 +606,109 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
       return `[${intervals}]`;
     })
     .join(' | ');
+}
+
+/**
+ * Convert an Apple Loop chord event to a DetectedChord.
+ * Similar to toDetectedChord in gesture.ts, but for Apple Loop metadata.
+ */
+export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
+  chord: DetectedChord | null;
+  symbol: string;
+} {
+  const quality = findQualityByIntervals(event.intervals);
+
+  // If no root, return null chord with interval description
+  if (!event.rootName || event.rootPc === undefined) {
+    const symbol = quality ? `?${quality.displayName}` : `[${event.intervals.join(',')}]`;
+    return { chord: null, symbol };
+  }
+
+  // If we have root but no quality match, create a custom symbol
+  if (!quality) {
+    const symbol = `${event.rootName}[${event.intervals.join(',')}]`;
+    return { chord: null, symbol };
+  }
+
+  // Full chord with root and quality
+  const symbol = `${event.rootName}${quality.displayName}`;
+
+  // Build DetectedChord (minimal structure for display)
+  const chord: DetectedChord = {
+    root: event.rootPc,
+    rootName: event.rootName,
+    qualityKey: quality.key,
+    symbol,
+    qualityName: quality.fullName,
+    observedPcs: event.intervals.map(i => (event.rootPc + i) % 12).sort((a, b) => a - b),
+    templatePcs: quality.pcs.map(i => (event.rootPc + i) % 12).sort((a, b) => a - b),
+  };
+
+  return { chord, symbol };
+}
+
+/**
+ * Convert Apple Loop chord events into a Leadsheet structure.
+ * Groups chords by bar and creates proper LeadsheetChord entries.
+ *
+ * @param events - Apple Loop chord events (should already be sorted by position)
+ * @param numBars - Total number of bars in the clip
+ * @param beatsPerBar - Beats per bar (typically 4)
+ */
+export function appleLoopEventsToLeadsheet(
+  events: AppleLoopChordEvent[],
+  numBars: number,
+  beatsPerBar: number = 4,
+): Leadsheet | null {
+  if (events.length === 0) return null;
+
+  // Group events by bar
+  const eventsByBar = new Map<number, AppleLoopChordEvent[]>();
+
+  for (const event of events) {
+    // Calculate which bar this event belongs to
+    // (simplified: assume single-bar loops or events within first bar)
+    const bar = Math.floor(event.positionBeats / beatsPerBar);
+    if (!eventsByBar.has(bar)) {
+      eventsByBar.set(bar, []);
+    }
+    eventsByBar.get(bar)!.push(event);
+  }
+
+  // Create leadsheet bars
+  const bars: LeadsheetBar[] = [];
+
+  for (let barIdx = 0; barIdx < numBars; barIdx++) {
+    const barEvents = eventsByBar.get(barIdx) || [];
+
+    if (barEvents.length === 0) {
+      // Empty bar - could inherit from previous or show as NC
+      continue;
+    }
+
+    const chords: LeadsheetChord[] = barEvents.map((event, position) => {
+      const { chord, symbol } = appleLoopEventToDetectedChord(event);
+
+      return {
+        chord,
+        inputText: symbol,
+        position,
+        totalInBar: barEvents.length,
+      };
+    });
+
+    bars.push({
+      bar: barIdx,
+      chords,
+      isRepeat: false,
+    });
+  }
+
+  // Create input text from all events (for round-trip editing)
+  const inputText = formatChordTimeline(events);
+
+  return {
+    inputText,
+    bars,
+  };
 }

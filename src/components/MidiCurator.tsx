@@ -4,7 +4,7 @@ import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
 import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcuratorSegments } from '../lib/midi-parser';
-import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots } from '../lib/apple-loops-parser';
+import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
@@ -157,6 +157,7 @@ export function MidiCurator() {
     filename: string,
     extraTags: string[] = [],
     extraNotes: string = '',
+    providedLeadsheet?: Leadsheet | null,
   ) => {
     if (!db) return;
 
@@ -200,9 +201,11 @@ export function MidiCurator() {
       segmentation = { boundaries: mcurator.boundaries, segmentChords };
     }
 
-    // Restore leadsheet from MCURATOR metadata (if present)
+    // Restore leadsheet from MCURATOR metadata, or use provided leadsheet (e.g., from Apple Loops)
     let leadsheet: Leadsheet | undefined;
-    if (mcurator?.leadsheetText) {
+    if (providedLeadsheet) {
+      leadsheet = providedLeadsheet;
+    } else if (mcurator?.leadsheetText) {
       leadsheet = parseLeadsheet(mcurator.leadsheetText, gesture.num_bars);
     }
 
@@ -255,9 +258,12 @@ export function MidiCurator() {
             continue;
           }
 
-          // Parse MIDI to get notes for root inference
+          // Parse MIDI to get notes and determine number of bars
           const midiData = parseMIDI(result.midi);
           const midiNotes = extractNotes(midiData);
+          const timeSig = extractTimeSignature(midiData);
+          const tempGesture = extractGesture(midiNotes, midiData.ticksPerBeat, timeSig);
+          const numBars = tempGesture.num_bars;
 
           // Enrich chord events with roots inferred from MIDI (for b8=15 case)
           let chordEvents = result.chordEvents;
@@ -275,7 +281,10 @@ export function MidiCurator() {
             extraNotes += ` | Chords: ${formatChordTimeline(chordEvents)}`;
           }
 
-          await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes);
+          // Convert chord events to leadsheet structure
+          const leadsheet = appleLoopEventsToLeadsheet(chordEvents, numBars, result.beatsPerBar);
+
+          await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes, leadsheet);
           continue;
         }
 
