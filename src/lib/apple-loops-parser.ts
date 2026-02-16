@@ -5,7 +5,7 @@
  * Based on reverse-engineering documented in docs/APPLE_LOOPS_REVERSE_ENGINEERING.md
  */
 
-import { detectChordFromPcs } from './chord-detect';
+import { findQualityByIntervals } from './chord-dictionary';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -612,30 +612,24 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
 
   return events
     .map((e) => {
+      // Look up chord quality from interval pattern
+      const quality = findQualityByIntervals(e.intervals);
+
       if (e.rootName && e.rootPc !== undefined) {
         // We have a decoded root - format as chord symbol
-        // Convert intervals to absolute pitch classes
-        const absolutePcs = e.intervals.map((interval) => (e.rootPc! + interval) % 12);
-
-        // Detect chord quality
-        const match = detectChordFromPcs(absolutePcs);
-
-        if (match && match.root === e.rootPc) {
-          // Successful match - use the chord symbol (replace detected root with our spelling)
-          return match.symbol.replace(match.rootName, e.rootName);
+        if (quality) {
+          // Use the quality's display name
+          return `${e.rootName}${quality.displayName}`;
         }
 
         // Fallback: show root + intervals
         return `${e.rootName}[${e.intervals.join(',')}]`;
       }
 
-      // No root decoded - try to detect chord quality from intervals alone
-      // Try with root assumed to be 0 (C)
-      const match = detectChordFromPcs(e.intervals);
-
-      if (match && match.root === 0) {
-        // We found a quality! Show it as "?" + suffix (remove the root name)
-        return `?${match.symbol.replace(match.rootName, '')}`;
+      // No root decoded - show quality or intervals
+      if (quality) {
+        // We found a quality! Show it as "?" + display name
+        return `?${quality.displayName}`;
       }
 
       // Fallback: show intervals only

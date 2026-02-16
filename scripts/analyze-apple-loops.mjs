@@ -56,6 +56,41 @@ function decodeBe22(be22, beatsPerBar) {
   return pos;
 }
 
+// Minimal chord quality lookup (subset of common qualities)
+const CHORD_QUALITIES = [
+  { key: "maj", displayName: "", pcs: [0,4,7] },
+  { key: "min", displayName: "-", pcs: [0,3,7] },
+  { key: "maj7", displayName: "∆", pcs: [0,4,7,11] },
+  { key: "min7", displayName: "-7", pcs: [0,3,7,10] },
+  { key: "7", displayName: "7", pcs: [0,4,7,10] },
+  { key: "min7b5", displayName: "ø", pcs: [0,3,6,10] },
+  { key: "dim7", displayName: "°7", pcs: [0,3,6,9] },
+  { key: "sus4", displayName: "sus4", pcs: [0,5,7] },
+  { key: "sus2", displayName: "sus2", pcs: [0,2,7] },
+  { key: "7sus4", displayName: "7sus4", pcs: [0,5,7,10] },
+  { key: "maj6", displayName: "6", pcs: [0,4,7,9] },
+  { key: "min6", displayName: "-6", pcs: [0,3,7,9] },
+  { key: "7b9", displayName: "7b9", pcs: [0,4,7,10,1] },
+  { key: "7#9", displayName: "7#9", pcs: [0,4,7,10,3] },
+  { key: "7b13", displayName: "7b13", pcs: [0,4,7,10,8] },
+  { key: "9", displayName: "9", pcs: [0,4,7,10,2] },
+  { key: "maj9", displayName: "∆9", pcs: [0,4,7,11,2] },
+  { key: "min9", displayName: "-9", pcs: [0,3,7,10,2] },
+];
+
+function findQualityByIntervals(intervals) {
+  const sorted = [...new Set(intervals)].sort((a, b) => a - b);
+
+  for (const quality of CHORD_QUALITIES) {
+    if (quality.pcs.length === sorted.length &&
+        quality.pcs.every((pc, i) => pc === sorted[i])) {
+      return quality;
+    }
+  }
+
+  return null;
+}
+
 function parseIffChunks(data, startOffset = 0) {
   const chunks = [];
   let offset = startOffset;
@@ -352,8 +387,15 @@ for (const filePath of args) {
     if (result.chordEvents.length > 0) {
       console.log(`\nChord Events (${result.chordEvents.length}):`);
       for (const event of result.chordEvents) {
-        const rootInfo = event.rootName ? `${event.rootName} (PC=${event.rootPc})` : 'unknown root';
-        console.log(`  Beat ${event.positionBeats.toFixed(2)}: ${rootInfo}, intervals [${event.intervals.join(',')}]`);
+        const quality = findQualityByIntervals(event.intervals);
+        const symbol = event.rootName && quality
+          ? `${event.rootName}${quality.displayName}`
+          : event.rootName
+            ? `${event.rootName}[${event.intervals.join(',')}]`
+            : quality
+              ? `?${quality.displayName}`
+              : `[${event.intervals.join(',')}]`;
+        console.log(`  Beat ${event.positionBeats.toFixed(2)}: ${symbol}`);
         console.log(`    mask=0x${event.mask.toString(16).padStart(3, '0')} be22=0x${event.rawBe22.toString(16).padStart(8, '0')} b8=${event.b8} b9=${event.b9}`);
       }
     } else {

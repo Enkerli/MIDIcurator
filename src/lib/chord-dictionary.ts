@@ -326,3 +326,23 @@ export function getAllQualities(): readonly ChordQuality[] {
 export function dictionarySize(): number {
   return CHORD_QUALITIES.length;
 }
+
+/**
+ * Look up a chord quality by its interval pattern.
+ * Intervals should be semitones from root (e.g., [0,4,7,11] for maj7).
+ * Returns the first matching quality, or undefined if no exact match.
+ */
+export function findQualityByIntervals(intervals: number[]): ChordQuality | undefined {
+  // Normalize intervals to sorted set
+  const sorted = [...new Set(intervals)].sort((a, b) => a - b);
+
+  // Search for exact match in dictionary
+  for (const quality of CHORD_QUALITIES) {
+    if (quality.pcs.length === sorted.length &&
+        quality.pcs.every((pc, i) => pc === sorted[i])) {
+      return quality;
+    }
+  }
+
+  return undefined;
+}
