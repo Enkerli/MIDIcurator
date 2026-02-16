@@ -605,8 +605,8 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
         const match = detectChordFromPcs(absolutePcs);
 
         if (match && match.root === e.rootPc) {
-          // Successful match - use the chord symbol
-          return `${e.rootName}${match.quality.suffix}`;
+          // Successful match - use the chord symbol (replace detected root with our spelling)
+          return match.symbol.replace(match.rootName, e.rootName);
         }
 
         // Fallback: show root + intervals
@@ -618,8 +618,8 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
       const match = detectChordFromPcs(e.intervals);
 
       if (match && match.root === 0) {
-        // We found a quality! Show it as "?" + quality
-        return `?${match.quality.suffix}`;
+        // We found a quality! Show it as "?" + suffix (remove the root name)
+        return `?${match.symbol.replace(match.rootName, '')}`;
       }
 
       // Fallback: show intervals only
