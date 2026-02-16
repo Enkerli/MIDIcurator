@@ -9,7 +9,7 @@
 
 /** A chord event extracted from a Sequ payload (type 103). */
 export interface AppleLoopChordEvent {
-  /** Pitch-class interval bitmask (12 bits, relative to unknown root). */
+  /** Pitch-class interval bitmask (12 bits, relative to root). */
   mask: number;
   /** Decoded intervals (semitones above root, e.g. [0, 4, 7]). */
   intervals: number[];
@@ -17,10 +17,14 @@ export interface AppleLoopChordEvent {
   positionBeats: number;
   /** Raw be22 field (for debugging / future use). */
   rawBe22: number;
-  /** Raw b8 field (may encode root — not yet proven). */
+  /** Raw b8 field (encodes accidental: 1=flat, 2=natural, 3=sharp). */
   b8: number;
-  /** Raw b9 field (may encode root — not yet proven). */
+  /** Raw b9 field (encodes pitch class 0-11). */
   b9: number;
+  /** Decoded root note name (e.g. "C", "F♯", "A♭"). */
+  rootName?: string;
+  /** Root pitch class (0-11). */
+  rootPc?: number;
 }
 
 /** Result of parsing an Apple Loops file. */
@@ -91,6 +95,55 @@ export function decodeIntervalMask(mask: number): number[] {
 }
 
 /**
+ * Decode root note from b8 (accidental) and b9 (pitch class).
+ *
+ * Based on empirical observations:
+ * - b9 = pitch class (0-11)
+ * - b8 = accidental type:
+ *   - 2 = natural (C, D, E, F, G, A, B)
+ *   - 3 = sharp (C♯, D♯, F♯, G♯, A♯)
+ *   - 1 = flat (D♭, E♭, G♭, A♭, B♭)
+ *
+ * @returns Root note name (e.g. "C", "F♯", "A♭") or null if invalid
+ */
+function decodeRootNote(b8: number, b9: number): { name: string; pc: number } | null {
+  const pc = b9 % 12;
+
+  // Accidental type from b8
+  const accidental = b8;
+
+  // Natural notes (b8 = 2)
+  const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
+
+  if (accidental === 2) {
+    // Natural
+    const idx = naturalPcs.indexOf(pc);
+    if (idx >= 0) {
+      return { name: naturals[idx]!, pc };
+    }
+  } else if (accidental === 3) {
+    // Sharp
+    const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
+    const sharpPcs = [1, 3, 6, 8, 10];
+    const idx = sharpPcs.indexOf(pc);
+    if (idx >= 0) {
+      return { name: sharpNames[idx]!, pc };
+    }
+  } else if (accidental === 1) {
+    // Flat
+    const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
+    const flatPcs = [1, 3, 6, 8, 10];
+    const idx = flatPcs.indexOf(pc);
+    if (idx >= 0) {
+      return { name: flatNames[idx]!, pc };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Decode be22 field into beat position within bar.
  * See docs: norm = (be22 & 0xFFFFFFFF) / 65536.0
  *           pos_beats = (1.0 - norm) * beats_per_bar, wrapped
@@ -127,6 +180,7 @@ function extractChordEventsFromSequ(
 
     const intervals = decodeIntervalMask(mask);
     const positionBeats = decodeBe22(be22, beatsPerBar);
+    const root = decodeRootNote(b8, b9);
 
     events.push({
       mask,
@@ -135,6 +189,8 @@ function extractChordEventsFromSequ(
       rawBe22: be22,
       b8,
       b9,
+      rootName: root?.name,
+      rootPc: root?.pc,
     });
   }
 
@@ -422,16 +478,47 @@ export function parseAppleLoop(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
 
 /**
  * Convert Apple Loop chord events into a human-readable chord timeline string.
- * Useful for debugging and display before root resolution is available.
- *
- * Since absolute roots are not yet decoded, chords are shown as interval sets.
+ * Formats chords as symbols when root is decoded, otherwise shows interval sets with quality.
  */
 export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
   if (events.length === 0) return '(no chord events)';
 
-  return events.map(e => {
-    const intervals = e.intervals.join(',');
-    const pos = e.positionBeats.toFixed(2);
-    return `beat ${pos}: [${intervals}]`;
-  }).join(' | ');
+  return events
+    .map((e) => {
+      if (e.rootName && e.rootPc !== undefined) {
+        // We have a decoded root - format as chord symbol
+        // Import chord detection here to avoid circular dependency
+        const { detectChordFromPcs } = require('./chord-detect');
+
+        // Convert intervals to absolute pitch classes
+        const absolutePcs = e.intervals.map((interval) => (e.rootPc! + interval) % 12);
+
+        // Detect chord quality
+        const match = detectChordFromPcs(absolutePcs);
+
+        if (match && match.root === e.rootPc) {
+          // Successful match - use the chord symbol
+          return `${e.rootName}${match.quality.suffix}`;
+        }
+
+        // Fallback: show root + intervals
+        return `${e.rootName}[${e.intervals.join(',')}]`;
+      }
+
+      // No root decoded - try to detect chord quality from intervals alone
+      const { detectChordFromPcs } = require('./chord-detect');
+
+      // Try with root assumed to be 0 (C)
+      const match = detectChordFromPcs(e.intervals);
+
+      if (match && match.root === 0) {
+        // We found a quality! Show it as "?" + quality
+        return `?${match.quality.suffix}`;
+      }
+
+      // Fallback: show intervals only
+      const intervals = e.intervals.join(',');
+      return `[${intervals}]`;
+    })
+    .join(' | ');
 }

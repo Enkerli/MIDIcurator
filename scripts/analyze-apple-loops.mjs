@@ -20,6 +20,34 @@ function decodeIntervalMask(mask) {
   return intervals;
 }
 
+function decodeRootNote(b8, b9) {
+  const pc = b9 % 12;
+  const accidental = b8;
+
+  // Natural notes (b8 = 2)
+  const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
+
+  if (accidental === 2) {
+    const idx = naturalPcs.indexOf(pc);
+    if (idx >= 0) return { name: naturals[idx], pc };
+  } else if (accidental === 3) {
+    // Sharp
+    const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
+    const sharpPcs = [1, 3, 6, 8, 10];
+    const idx = sharpPcs.indexOf(pc);
+    if (idx >= 0) return { name: sharpNames[idx], pc };
+  } else if (accidental === 1) {
+    // Flat
+    const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
+    const flatPcs = [1, 3, 6, 8, 10];
+    const idx = flatPcs.indexOf(pc);
+    if (idx >= 0) return { name: flatNames[idx], pc };
+  }
+
+  return null;
+}
+
 function decodeBe22(be22, beatsPerBar) {
   const norm = (be22 >>> 0) / 65536.0;
   let pos = (1.0 - norm) * beatsPerBar;
@@ -73,6 +101,7 @@ function extractChordEventsFromSequ(data, beatsPerBar) {
 
     const intervals = decodeIntervalMask(mask);
     const positionBeats = decodeBe22(be22, beatsPerBar);
+    const root = decodeRootNote(b8, b9);
 
     events.push({
       mask,
@@ -81,6 +110,8 @@ function extractChordEventsFromSequ(data, beatsPerBar) {
       rawBe22: be22,
       b8,
       b9,
+      rootName: root?.name,
+      rootPc: root?.pc,
     });
   }
 
@@ -320,7 +351,8 @@ for (const filePath of args) {
     if (result.chordEvents.length > 0) {
       console.log(`\nChord Events (${result.chordEvents.length}):`);
       for (const event of result.chordEvents) {
-        console.log(`  Beat ${event.positionBeats.toFixed(2)}: intervals [${event.intervals.join(',')}]`);
+        const rootInfo = event.rootName ? `${event.rootName} (PC=${event.rootPc})` : 'unknown root';
+        console.log(`  Beat ${event.positionBeats.toFixed(2)}: ${rootInfo}, intervals [${event.intervals.join(',')}]`);
         console.log(`    mask=0x${event.mask.toString(16).padStart(3, '0')} be22=0x${event.rawBe22.toString(16).padStart(8, '0')} b8=${event.b8} b9=${event.b9}`);
       }
     } else {
