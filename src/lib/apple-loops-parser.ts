@@ -160,13 +160,13 @@ function decodeRootNote(
 
 /**
  * Decode be22 field into beat position within bar.
- * Use high 16 bits only (low 16 bits are typically 0x0000).
- * See docs: norm = hi16 / 65536.0
+ * Use low 16 bits only (high 16 bits may contain other data).
+ * See docs: norm = lo16 / 65536.0
  *           pos_beats = (1.0 - norm) * beats_per_bar, wrapped
  */
 function decodeBe22(be22: number, beatsPerBar: number): number {
-  const hi16 = (be22 >>> 16) & 0xFFFF;  // Use high 16 bits only
-  const norm = hi16 / 65536.0;
+  const lo16 = be22 & 0xFFFF;  // Use low 16 bits only
+  const norm = lo16 / 65536.0;
   let pos = (1.0 - norm) * beatsPerBar;
   pos = ((pos % beatsPerBar) + beatsPerBar) % beatsPerBar;
   return pos;
