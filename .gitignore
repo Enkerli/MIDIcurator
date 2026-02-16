@@ -29,3 +29,7 @@ ChordSequences/
 
 # Analysis output files
 analysis*.txt
+
+# Apple Loops research files
+aif_chords_extract_*.py
+Apple Loops Overview Main.html

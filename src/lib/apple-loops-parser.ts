@@ -173,6 +173,21 @@ function decodeBe22(be22: number, beatsPerBar: number): number {
 /**
  * Scan a Sequ payload for chord events (type == 103).
  * Scans every byte position looking for type-103 records.
+ *
+ * Record layout (32 bytes total):
+ *   +0x00: u16 LE  type (103 for chord events)
+ *   +0x02: u16 LE  w1
+ *   +0x04: u16 LE  mask (pitch-class bitmask)
+ *   +0x06: u16 LE  w3
+ *   +0x08: u8      b8 (accidental/scheme marker)
+ *   +0x09: u8      b9 (PC or accidental hint)
+ *   +0x0A: u16     (padding/unknown)
+ *   +0x0C: u16 LE  x10
+ *   +0x0E: u16 LE  x12
+ *   +0x10: u32 BE  be14
+ *   +0x14: u32 BE  be18
+ *   +0x18: u32 BE  be22 (position)
+ *   +0x1C: u32 BE  be26
  */
 function extractChordEventsFromSequ(
   data: Uint8Array,
@@ -180,18 +195,17 @@ function extractChordEventsFromSequ(
 ): AppleLoopChordEvent[] {
   const events: AppleLoopChordEvent[] = [];
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const RECORD_SIZE = 30;
+  const RECORD_SIZE = 32; // Corrected from 30
 
-  // Scan for type==103 records at every byte position
-  // (events may not be 2-byte aligned from the payload start due to variable-length headers)
-  for (let off = 0; off + RECORD_SIZE <= data.length; off++) {
-    const type = view.getUint16(off);
+  // Scan for type==103 records at every 2-byte boundary
+  for (let off = 0; off + RECORD_SIZE <= data.length; off += 2) {
+    const type = view.getUint16(off, true); // Little-endian
     if (type !== 103) continue;
 
-    const mask = view.getUint16(off + 0x04);
+    const mask = view.getUint16(off + 0x04, true); // Little-endian!
     const b8 = data[off + 0x08]!;
     const b9 = data[off + 0x09]!;
-    const be22 = view.getUint32(off + 0x16);
+    const be22 = view.getUint32(off + 0x18, false); // Big-endian, corrected offset
 
     const intervals = decodeIntervalMask(mask);
     const positionBeats = decodeBe22(be22, beatsPerBar);

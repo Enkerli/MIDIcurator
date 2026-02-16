@@ -87,17 +87,17 @@ function parseIffChunks(data, startOffset = 0) {
 function extractChordEventsFromSequ(data, beatsPerBar) {
   const events = [];
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const RECORD_SIZE = 30;
+  const RECORD_SIZE = 32; // Corrected: 32 bytes, not 30
 
-  // Scan every byte position (events may not be 2-byte aligned from payload start)
-  for (let off = 0; off + RECORD_SIZE <= data.length; off++) {
-    const type = view.getUint16(off);
+  // Scan every 2-byte boundary
+  for (let off = 0; off + RECORD_SIZE <= data.length; off += 2) {
+    const type = view.getUint16(off, true); // Little-endian
     if (type !== 103) continue;
 
-    const mask = view.getUint16(off + 0x04);
+    const mask = view.getUint16(off + 0x04, true); // Little-endian!
     const b8 = data[off + 0x08];
     const b9 = data[off + 0x09];
-    const be22 = view.getUint32(off + 0x16);
+    const be22 = view.getUint32(off + 0x18, false); // Big-endian, offset corrected
 
     const intervals = decodeIntervalMask(mask);
     const positionBeats = decodeBe22(be22, beatsPerBar);
