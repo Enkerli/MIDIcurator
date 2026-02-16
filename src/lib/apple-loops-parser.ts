@@ -17,14 +17,16 @@ export interface AppleLoopChordEvent {
   positionBeats: number;
   /** Raw be22 field (for debugging / future use). */
   rawBe22: number;
-  /** Raw b8 field (encodes accidental: 1=flat, 2=natural, 3=sharp). */
+  /** Raw b8 field (encodes accidental: 1=flat, 2=natural, 3=sharp, or 15=scheme 2). */
   b8: number;
-  /** Raw b9 field (encodes pitch class 0-11). */
+  /** Raw b9 field (encodes pitch class 0-11 in scheme 1, or accidental hint in scheme 2). */
   b9: number;
-  /** Decoded root note name (e.g. "C", "F♯", "A♭"). */
+  /** Decoded root note name (e.g. "C", "F♯", "A♭") when b8≠15. */
   rootName?: string;
-  /** Root pitch class (0-11). */
+  /** Root pitch class (0-11) when b8≠15. */
   rootPc?: number;
+  /** Accidental preference hint (1=flat, 2=natural, 3=sharp) when b8=15. */
+  accidentalHint?: number;
 }
 
 /** Result of parsing an Apple Loops file. */
@@ -95,21 +97,32 @@ export function decodeIntervalMask(mask: number): number[] {
 }
 
 /**
- * Decode root note from b8 (accidental) and b9 (pitch class).
+ * Decode root note from b8 (accidental) and b9 (pitch class or accidental hint).
  *
- * Based on empirical observations:
+ * Two encoding schemes observed:
+ *
+ * **Scheme 1** (Apple first-party loops):
+ * - b8 = accidental type (1=flat, 2=natural, 3=sharp)
  * - b9 = pitch class (0-11)
- * - b8 = accidental type:
- *   - 2 = natural (C, D, E, F, G, A, B)
- *   - 3 = sharp (C♯, D♯, F♯, G♯, A♯)
- *   - 1 = flat (D♭, E♭, G♭, A♭, B♭)
  *
- * @returns Root note name (e.g. "C", "F♯", "A♭") or null if invalid
+ * **Scheme 2** (user-generated loops, b8=15):
+ * - b8 = 15 (special marker indicating scheme 2)
+ * - b9 = accidental preference (1=flat, 2=natural, 3=sharp)
+ * - Root PC must be inferred from MIDI notes
+ *
+ * @returns Object with accidental hint for scheme 2, or full root for scheme 1
  */
-function decodeRootNote(b8: number, b9: number): { name: string; pc: number } | null {
-  const pc = b9 % 12;
+function decodeRootNote(
+  b8: number,
+  b9: number,
+): { name: string; pc: number } | { accidentalHint: number } | null {
+  // Scheme 2: b8=15 means user-generated loop with accidental hint in b9
+  if (b8 === 15) {
+    return { accidentalHint: b9 };
+  }
 
-  // Accidental type from b8
+  // Scheme 1: Standard encoding
+  const pc = b9 % 12;
   const accidental = b8;
 
   // Natural notes (b8 = 2)
@@ -180,18 +193,29 @@ function extractChordEventsFromSequ(
 
     const intervals = decodeIntervalMask(mask);
     const positionBeats = decodeBe22(be22, beatsPerBar);
-    const root = decodeRootNote(b8, b9);
+    const rootInfo = decodeRootNote(b8, b9);
 
-    events.push({
+    const event: AppleLoopChordEvent = {
       mask,
       intervals,
       positionBeats,
       rawBe22: be22,
       b8,
       b9,
-      rootName: root?.name,
-      rootPc: root?.pc,
-    });
+    };
+
+    if (rootInfo) {
+      if ('accidentalHint' in rootInfo) {
+        // Scheme 2: accidental hint only
+        event.accidentalHint = rootInfo.accidentalHint;
+      } else {
+        // Scheme 1: full root decode
+        event.rootName = rootInfo.name;
+        event.rootPc = rootInfo.pc;
+      }
+    }
+
+    events.push(event);
   }
 
   // Sort by position within bar
@@ -474,6 +498,91 @@ export function parseAppleLoop(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
   }
 
   throw new Error(`Unrecognized container format (magic: "${magic4}")`);
+}
+
+/**
+ * Infer chord roots from MIDI notes for events that have accidentalHint.
+ * Uses the most common pitch class in the MIDI data as the root.
+ *
+ * @param events Chord events to enrich
+ * @param midiNotes Array of MIDI note objects with pitch and tick properties
+ * @returns Events with inferred roots added
+ */
+export function enrichChordEventsWithMidiRoots(
+  events: AppleLoopChordEvent[],
+  midiNotes: Array<{ pitch: number; tick: number }>,
+): AppleLoopChordEvent[] {
+  if (midiNotes.length === 0) return events;
+
+  // Count pitch class occurrences
+  const pcCounts = new Map<number, number>();
+  for (const note of midiNotes) {
+    const pc = note.pitch % 12;
+    pcCounts.set(pc, (pcCounts.get(pc) || 0) + 1);
+  }
+
+  // Find most common PC (likely the root/tonic)
+  let inferredRootPc = 0;
+  let maxCount = 0;
+  for (const [pc, count] of pcCounts) {
+    if (count > maxCount) {
+      maxCount = count;
+      inferredRootPc = pc;
+    }
+  }
+
+  // Apply inferred root to events with accidentalHint
+  return events.map((event) => {
+    if (event.accidentalHint !== undefined && event.rootPc === undefined) {
+      // We have an accidental hint but no root - infer from MIDI
+      const rootPc = inferredRootPc;
+      const accidental = event.accidentalHint;
+
+      // Spell the root using the accidental hint
+      const rootName = spellRootWithHint(rootPc, accidental);
+
+      return {
+        ...event,
+        rootPc,
+        rootName,
+      };
+    }
+    return event;
+  });
+}
+
+/**
+ * Spell a root note given pitch class and accidental hint.
+ */
+function spellRootWithHint(pc: number, accidentalHint: number): string {
+  const naturals = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const naturalPcs = [0, 2, 4, 5, 7, 9, 11];
+
+  // Try natural first
+  const natIdx = naturalPcs.indexOf(pc);
+  if (natIdx >= 0 && accidentalHint === 2) {
+    return naturals[natIdx]!;
+  }
+
+  // Sharps
+  const sharpNames = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
+  const sharpPcs = [1, 3, 6, 8, 10];
+  const sharpIdx = sharpPcs.indexOf(pc);
+  if (sharpIdx >= 0 && accidentalHint === 3) {
+    return sharpNames[sharpIdx]!;
+  }
+
+  // Flats
+  const flatNames = ['D♭', 'E♭', 'G♭', 'A♭', 'B♭'];
+  const flatPcs = [1, 3, 6, 8, 10];
+  const flatIdx = flatPcs.indexOf(pc);
+  if (flatIdx >= 0 && accidentalHint === 1) {
+    return flatNames[flatIdx]!;
+  }
+
+  // Fallback: use default spelling
+  const allNames = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+  return allNames[pc] || '?';
 }
 
 /**

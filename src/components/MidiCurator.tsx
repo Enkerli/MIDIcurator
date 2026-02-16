@@ -4,7 +4,7 @@ import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
 import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcuratorSegments } from '../lib/midi-parser';
-import { isAppleLoopFile, parseAppleLoop, formatChordTimeline } from '../lib/apple-loops-parser';
+import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
@@ -255,14 +255,24 @@ export function MidiCurator() {
             continue;
           }
 
+          // Parse MIDI to get notes for root inference
+          const midiData = parseMIDI(result.midi);
+          const midiNotes = extractNotes(midiData);
+
+          // Enrich chord events with roots inferred from MIDI (for b8=15 case)
+          let chordEvents = result.chordEvents;
+          if (chordEvents.some(e => e.accidentalHint !== undefined)) {
+            chordEvents = enrichChordEventsWithMidiRoots(chordEvents, midiNotes);
+          }
+
           // Build a .mid filename from the loop filename
           const baseName = file.name.replace(/\.(aif|aiff|caf)$/i, '');
           const midiFilename = `${baseName}.mid`;
 
           // Build extra notes with chord timeline (if chord events found)
           let extraNotes = `Source: Apple Loop (${result.format.toUpperCase()})`;
-          if (result.chordEvents.length > 0) {
-            extraNotes += ` | Chords: ${formatChordTimeline(result.chordEvents)}`;
+          if (chordEvents.length > 0) {
+            extraNotes += ` | Chords: ${formatChordTimeline(chordEvents)}`;
           }
 
           await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes);
