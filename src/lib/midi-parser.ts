@@ -58,6 +58,9 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
   const events: MidiEvent[] = [];
   let offset = 0;
   let runningStatus = 0;
+  // Accumulate delta time across silently-consumed events so it isn't lost.
+  // When a meta event is skipped, its delta carries forward to the next stored event.
+  let pendingDelta = 0;
 
   while (offset < data.length) {
     // Read variable-length delta time
@@ -67,6 +70,9 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
       byte = data[offset++]!;
       delta = (delta << 7) | (byte & 0x7F);
     } while (byte & 0x80);
+
+    // Accumulate into pendingDelta; will be used for the next stored event
+    pendingDelta += delta;
 
     // Read event
     let status = data[offset]!;
@@ -97,25 +103,29 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
         // Set Tempo
         const microsecondsPerBeat = (metaData[0]! << 16) | (metaData[1]! << 8) | metaData[2]!;
         const bpm = Math.round(60000000 / microsecondsPerBeat);
-        events.push({ delta, type: 'tempo', bpm });
+        events.push({ delta: pendingDelta, type: 'tempo', bpm });
+        pendingDelta = 0;
       } else if (metaType === 0x58 && length >= 2) {
         // Time Signature: nn/2^dd
         const numerator = metaData[0]!;
         const denominator = Math.pow(2, metaData[1]!);
-        events.push({ delta, type: 'timeSig', numerator, denominator });
+        events.push({ delta: pendingDelta, type: 'timeSig', numerator, denominator });
+        pendingDelta = 0;
       } else if (metaType === 0x06) {
         // Marker
         const text = new TextDecoder().decode(metaData);
-        events.push({ delta, type: 'marker', text });
+        events.push({ delta: pendingDelta, type: 'marker', text });
+        pendingDelta = 0;
       } else if (metaType === 0x01) {
         // Text event
         const text = new TextDecoder().decode(metaData);
-        events.push({ delta, type: 'text', text });
+        events.push({ delta: pendingDelta, type: 'text', text });
+        pendingDelta = 0;
       } else if (metaType === 0x2F) {
         // End of Track
         break;
       }
-      // Other meta events silently consumed (key sig, etc.)
+      // Other meta events silently consumed — pendingDelta accumulates
     } else if (status === 0xF0 || status === 0xF7) {
       // SysEx events — variable-length data
       let length = 0;
@@ -140,17 +150,21 @@ export function parseTrack(data: Uint8Array): MidiEvent[] {
         // Note On
         const note = data[offset++]!;
         const velocity = data[offset++]!;
-        events.push({ delta, type: 'noteOn', note, velocity, channel });
+        events.push({ delta: pendingDelta, type: 'noteOn', note, velocity, channel });
+        pendingDelta = 0;
       } else if (type === 0x80) {
         // Note Off
         const note = data[offset++]!;
         const velocity = data[offset++]!;
-        events.push({ delta, type: 'noteOff', note, velocity, channel });
+        events.push({ delta: pendingDelta, type: 'noteOff', note, velocity, channel });
+        pendingDelta = 0;
       } else if (type === 0xC0 || type === 0xD0) {
         // Program Change, Channel Pressure: 1 data byte
+        // Non-note events: consume data but don't reset pendingDelta
         offset += 1;
       } else if (type === 0xB0 || type === 0xE0 || type === 0xA0) {
         // Control Change, Pitch Bend, Aftertouch: 2 data bytes
+        // Non-note events: consume data but don't reset pendingDelta
         offset += 2;
       }
     }
