@@ -4,7 +4,6 @@ interface LeadsheetBarProps {
   leadsheet: Leadsheet;
   ticksPerBar: number;
   ticksPerBeat: number;
-  totalTicks: number;
   numBars: number;
   /** When set, use pixel widths instead of percentages (for zoom alignment). */
   drawWidth?: number;
@@ -18,16 +17,17 @@ export function LeadsheetBar({
   leadsheet,
   ticksPerBar,
   ticksPerBeat,
-  totalTicks,
   numBars,
   drawWidth,
 }: LeadsheetBarProps) {
   if (leadsheet.bars.length === 0) return null;
 
+  // Use bar grid (numBars * ticksPerBar) for harmonic alignment, not totalTicks (MIDI extent)
+  const harmonicTicks = numBars * ticksPerBar;
 
   const usePixelWidths = drawWidth !== undefined;
-  const barWidthPercent = (ticksPerBar / totalTicks) * 100;
-  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
+  const barWidthPercent = (ticksPerBar / harmonicTicks) * 100;
+  const barWidthPx = usePixelWidths ? (ticksPerBar / harmonicTicks) * drawWidth : 0;
   const barWidthStyle = usePixelWidths
     ? { width: `${barWidthPx}px` }
     : { width: `${barWidthPercent}%` };
