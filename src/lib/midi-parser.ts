@@ -259,6 +259,12 @@ export interface McuratorMetadata {
   fileInfo?: Record<string, unknown>;
   /** Raw leadsheet input text (if embedded in MIDI metadata). */
   leadsheetText?: string;
+  /**
+   * Per-chord beat timing overrides, keyed by "barIndex:chordIndex".
+   * Each value is [beatPosition, duration] in beats from the bar start.
+   * Only present when chords have non-equal-division timing (e.g. after a drag).
+   */
+  leadsheetTiming?: Record<string, [number, number]>;
   /** Source clip filename (for variants). */
   variantOf?: string;
   /** Clip notes / generation info (for variants). */
@@ -325,6 +331,7 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
   // Parse file-level info, leadsheet, and variant metadata from text events
   let fileInfo: Record<string, unknown> | undefined;
   let leadsheetText: string | undefined;
+  let leadsheetTiming: Record<string, [number, number]> | undefined;
   let variantOf: string | undefined;
   let clipNotes: string | undefined;
   for (const te of textEvents) {
@@ -336,6 +343,18 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
       if (typeof json.notes === 'string') clipNotes = json.notes;
     } else if (json.type === 'leadsheet' && typeof json.text === 'string') {
       leadsheetText = json.text;
+      // Restore per-chord beat timing if present (e.g. after boundary drag)
+      if (json.timing && typeof json.timing === 'object' && !Array.isArray(json.timing)) {
+        const raw = json.timing as Record<string, unknown>;
+        const timing: Record<string, [number, number]> = {};
+        for (const [key, val] of Object.entries(raw)) {
+          if (Array.isArray(val) && val.length === 2 &&
+              typeof val[0] === 'number' && typeof val[1] === 'number') {
+            timing[key] = [val[0], val[1]];
+          }
+        }
+        if (Object.keys(timing).length > 0) leadsheetTiming = timing;
+      }
     }
   }
 
@@ -381,5 +400,5 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
   const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
   const boundaries = segments.map(s => s.tick);
 
-  return { boundaries, segments, fileInfo, leadsheetText, variantOf, clipNotes };
+  return { boundaries, segments, fileInfo, leadsheetText, leadsheetTiming, variantOf, clipNotes };
 }

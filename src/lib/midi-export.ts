@@ -106,12 +106,28 @@ function buildMetadataEvents(
 
   // Leadsheet text event at tick 0 (if present)
   if (leadsheet && leadsheet.inputText) {
-    const lsJson = JSON.stringify({
+    const lsData: Record<string, unknown> = {
       type: 'leadsheet',
       text: leadsheet.inputText,
       bars: leadsheet.bars.length,
-    });
-    metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${lsJson}`) });
+    };
+
+    // Serialize per-chord beat timing (only where explicitly set, to keep payload small).
+    // Format: { "barIndex:chordIndex": [beatPosition, duration], ... }
+    const timing: Record<string, [number, number]> = {};
+    for (const bar of leadsheet.bars) {
+      for (let j = 0; j < bar.chords.length; j++) {
+        const c = bar.chords[j]!;
+        if (c.beatPosition !== undefined && c.duration !== undefined) {
+          timing[`${bar.bar}:${j}`] = [c.beatPosition, c.duration];
+        }
+      }
+    }
+    if (Object.keys(timing).length > 0) {
+      lsData.timing = timing;
+    }
+
+    metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${JSON.stringify(lsData)}`) });
   }
 
   if (!segmentation || segmentation.boundaries.length === 0) return metaEvents;

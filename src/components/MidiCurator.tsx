@@ -207,6 +207,20 @@ export function MidiCurator() {
       leadsheet = providedLeadsheet;
     } else if (mcurator?.leadsheetText) {
       leadsheet = parseLeadsheet(mcurator.leadsheetText, gesture.num_bars);
+      // Restore per-chord beat timing that was serialized by the exporter.
+      // parseLeadsheet gives equal-division positions; timing overrides replace those.
+      if (leadsheet && mcurator.leadsheetTiming) {
+        const timing = mcurator.leadsheetTiming;
+        for (const bar of leadsheet.bars) {
+          for (let j = 0; j < bar.chords.length; j++) {
+            const entry = timing[`${bar.bar}:${j}`];
+            if (entry) {
+              bar.chords[j]!.beatPosition = entry[0];
+              bar.chords[j]!.duration = entry[1];
+            }
+          }
+        }
+      }
     }
 
     const clipNotes = [mcurator?.clipNotes, extraNotes].filter(Boolean).join('; ');
