@@ -164,7 +164,7 @@ function isSegmentSelected(
 export function ChordBar({
   barChords,
   ticksPerBar,
-  ticksPerBeat,
+  ticksPerBeat: _ticksPerBeat,
   totalTicks: totalTicksProp,
   drawWidth,
   selectionRange,
@@ -179,18 +179,14 @@ export function ChordBar({
   if (barChords.length === 0) return null;
 
   // Use the same total tick span as the piano roll for alignment.
-  // Falls back to bar-grid approximation when totalTicks is not provided.
+  // Falls back to bar-grid when totalTicks is not provided.
   const numBars = barChords.length;
-  const totalTicks = totalTicksProp ?? (numBars * ticksPerBar + ticksPerBeat);
-
-  // Harmonic grid: numBars * ticksPerBar — used for bar widths so bars align
-  // with bar lines regardless of MIDI note extent (which can exceed the bar grid).
-  const harmonicTicks = numBars * ticksPerBar;
+  const totalTicks = totalTicksProp ?? (numBars * ticksPerBar);
 
   // When drawWidth is provided (zoom mode), use pixel widths; otherwise percentages
   const usePixelWidths = drawWidth !== undefined;
-  const barWidthPercent = (ticksPerBar / harmonicTicks) * 100;
-  const barWidthPx = usePixelWidths ? (ticksPerBar / harmonicTicks) * drawWidth : 0;
+  const barWidthPercent = (ticksPerBar / totalTicks) * 100;
+  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
 
   const handleDoubleClick = (bar: number, segmentIndex: number) => {
     if (onChordEdit) {

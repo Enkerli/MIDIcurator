@@ -68,11 +68,9 @@ export function computeLayout(
   const maxPitch = Math.min(127, Math.max(...harmonic.pitches) + 2);
   const pitchRange = maxPitch - minPitch + 1;
 
-  const lastTick = Math.max(
-    ...gesture.onsets.map((onset, i) => onset + gesture.durations[i]!),
-  );
-  // Add a little padding at the end (1 beat worth)
-  const totalTicks = lastTick + gesture.ticks_per_beat;
+  // Use the bar grid as the canonical total ticks so the piano roll,
+  // ChordBar, and LeadsheetBar all share the same pixel-per-tick scale.
+  const totalTicks = gesture.num_bars * gesture.ticks_per_bar;
 
   const pxPerTick = (baseDrawWidth / totalTicks) * zoomLevel;
   const pxPerSemitone = drawHeight / pitchRange;
@@ -131,10 +129,7 @@ export function computeGridLines(
 ): Array<{ x: number; isBar: boolean; label: string }> {
   const lines: Array<{ x: number; isBar: boolean; label: string }> = [];
 
-  const lastTick = Math.max(
-    ...gesture.onsets.map((onset, i) => onset + gesture.durations[i]!),
-  );
-  const totalTicks = lastTick + gesture.ticks_per_beat;
+  const totalTicks = gesture.num_bars * gesture.ticks_per_bar;
 
   for (let tick = 0; tick <= totalTicks; tick += gesture.ticks_per_beat) {
     const x = layout.labelWidth + tick * layout.pxPerTick;
