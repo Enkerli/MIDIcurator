@@ -338,8 +338,11 @@ export function findQualityByIntervals(intervals: number[]): ChordQuality | unde
 
   // Search for exact match in dictionary
   for (const quality of CHORD_QUALITIES) {
-    if (quality.pcs.length === sorted.length &&
-        quality.pcs.every((pc, i) => pc === sorted[i])) {
+    // Sort quality.pcs for comparison (dictionary stores in interval order, not sorted)
+    const qualitySorted = [...quality.pcs].sort((a, b) => a - b);
+
+    if (qualitySorted.length === sorted.length &&
+        qualitySorted.every((pc, i) => pc === sorted[i])) {
       return quality;
     }
   }
