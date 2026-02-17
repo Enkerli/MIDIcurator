@@ -100,23 +100,22 @@ function buildMinimalSmf(ppq: number = 480): Uint8Array {
 function buildChordRecord(
   mask: number,
   be22: number,
-  b8: number = 0,
-  b9: number = 0,
+  b8: number = 2,  // Default to natural (b8=2)
+  b9: number = 0,  // Default to C (pc=0)
 ): Uint8Array {
-  const rec = new Uint8Array(30);
+  const rec = new Uint8Array(32);  // 32 bytes, not 30
   const view = new DataView(rec.buffer);
-  view.setUint16(0, 103);       // type
-  view.setUint16(2, 0);         // w1
-  view.setUint16(4, mask);      // mask
-  view.setUint16(6, 0x0f07);    // w3
+  view.setUint16(0, 103, true);       // type (little-endian)
+  view.setUint16(2, 0, true);         // w1
+  view.setUint16(4, mask, true);      // mask (little-endian!)
+  view.setUint16(6, 0x0f07, true);    // w3
   rec[8] = b8;
   rec[9] = b9;
-  view.setUint16(10, 0xb200);   // x10
-  view.setUint16(12, 0);        // x12
-  view.setUint32(14, 0x00008000); // be14
-  view.setUint32(18, 0);        // be18
-  view.setUint32(22, be22);     // be22
-  view.setUint32(26, 0);        // be26
+  view.setUint16(10, 0xb200, true);   // x10
+  view.setUint16(12, 0, true);        // x12
+  view.setUint32(14, 0x00008000, false); // be14 (big-endian)
+  view.setUint32(0x18, be22, false);  // be22 at offset 0x18 (big-endian)
+  view.setUint32(0x1c, 0, false);     // be26 (big-endian)
   return rec;
 }
 
@@ -286,7 +285,7 @@ describe('parseAppleLoop — AIFF', () => {
 
     const result = parseAppleLoop(aiff);
     expect(result.midi).toBeNull();
-    expect(result.format).toBe('aiff');
+    expect(result.format).toBe('AIFF');
   });
 
   it('handles multiple chord events sorted by position', () => {
@@ -353,7 +352,7 @@ describe('parseAppleLoop — CAF', () => {
     const caf = buildCaf([{ type: 'midi', data: smf }]);
 
     const result = parseAppleLoop(caf);
-    expect(result.format).toBe('caf');
+    expect(result.format).toBe('CAF');
     expect(result.midi).not.toBeNull();
   });
 
@@ -362,7 +361,7 @@ describe('parseAppleLoop — CAF', () => {
     const caf = buildCaf([{ type: 'desc', data: descData }]);
 
     const result = parseAppleLoop(caf);
-    expect(result.format).toBe('caf');
+    expect(result.format).toBe('CAF');
     expect(result.midi).toBeNull();
   });
 });
@@ -374,19 +373,20 @@ describe('formatChordTimeline', () => {
 
   it('formats a single event', () => {
     const events: AppleLoopChordEvent[] = [
-      { mask: 0x91, intervals: [0, 4, 7], positionBeats: 0, rawBe22: 0, b8: 0, b9: 0 },
+      { mask: 0x91, intervals: [0, 4, 7], positionBeats: 0, rawBe22: 0, b8: 2, b9: 0 },
     ];
-    expect(formatChordTimeline(events)).toBe('beat 0.00: [0,4,7]');
+    // With b8=2 (natural) and b9=0 (C), should format as "C" (major triad)
+    expect(formatChordTimeline(events)).toBe('C');
   });
 
   it('formats multiple events separated by pipes', () => {
     const events: AppleLoopChordEvent[] = [
-      { mask: 0x91, intervals: [0, 4, 7], positionBeats: 0, rawBe22: 0, b8: 0, b9: 0 },
-      { mask: 0x89, intervals: [0, 3, 7], positionBeats: 2, rawBe22: 0, b8: 0, b9: 0 },
+      { mask: 0x91, intervals: [0, 4, 7], positionBeats: 0, rawBe22: 0, b8: 2, b9: 0, rootName: 'C', rootPc: 0 },
+      { mask: 0x89, intervals: [0, 3, 7], positionBeats: 2, rawBe22: 0, b8: 2, b9: 2, rootName: 'D', rootPc: 2 },
     ];
     const result = formatChordTimeline(events);
     expect(result).toContain('|');
-    expect(result).toContain('[0,4,7]');
-    expect(result).toContain('[0,3,7]');
+    expect(result).toContain('C'); // Major triad
+    expect(result).toContain('D-'); // Minor triad
   });
 });
