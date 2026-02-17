@@ -735,8 +735,10 @@ export function appleLoopEventsToLeadsheet(
     });
   }
 
-  // Create input text from all events (for round-trip editing)
-  const inputText = formatChordTimeline(events);
+  // Create input text with bar delimiters (pipe) and space-separated chords within bars
+  const inputText = bars.map(bar =>
+    bar.chords.map(c => c.inputText).join(' ')
+  ).join(' | ');
 
   return {
     inputText,
