@@ -373,9 +373,18 @@ describe('formatChordTimeline', () => {
 
   it('formats a single event', () => {
     const events: AppleLoopChordEvent[] = [
-      { mask: 0x91, intervals: [0, 4, 7], positionBeats: 0, rawBe22: 0, b8: 2, b9: 0 },
+      {
+        mask: 0x91,
+        intervals: [0, 4, 7],
+        positionBeats: 0,
+        rawBe22: 0,
+        b8: 2,
+        b9: 0,
+        rootName: 'C',
+        rootPc: 0,
+      },
     ];
-    // With b8=2 (natural) and b9=0 (C), should format as "C" (major triad)
+    // With root C and intervals [0,4,7] (major triad), should format as "C"
     expect(formatChordTimeline(events)).toBe('C');
   });
 
