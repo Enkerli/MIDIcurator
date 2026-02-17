@@ -268,7 +268,7 @@ export function MidiCurator() {
           // Enrich chord events with roots inferred from MIDI (for b8=15 case)
           let chordEvents = result.chordEvents;
           if (chordEvents.some(e => e.accidentalHint !== undefined)) {
-            chordEvents = enrichChordEventsWithMidiRoots(chordEvents, midiNotes);
+            chordEvents = enrichChordEventsWithMidiRoots(chordEvents, midiNotes as any);
           }
 
           // Build a .mid filename from the loop filename

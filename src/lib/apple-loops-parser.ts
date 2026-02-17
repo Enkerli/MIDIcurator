@@ -640,8 +640,8 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
     qualityKey: quality.key,
     symbol,
     qualityName: quality.fullName,
-    observedPcs: event.intervals.map(i => (event.rootPc + i) % 12).sort((a, b) => a - b),
-    templatePcs: quality.pcs.map(i => (event.rootPc + i) % 12).sort((a, b) => a - b),
+    observedPcs: event.intervals.map(i => (event.rootPc! + i) % 12).sort((a, b) => a - b),
+    templatePcs: quality.pcs.map(i => (event.rootPc! + i) % 12).sort((a, b) => a - b),
   };
 
   return { chord, symbol };

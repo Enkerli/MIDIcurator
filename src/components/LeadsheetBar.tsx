@@ -41,7 +41,6 @@ export function LeadsheetBar({
   const getChordStyle = (
     chord: LeadsheetChord,
     chordIndex: number,
-    chordsInBar: LeadsheetChord[],
   ): React.CSSProperties => {
     // If chord has explicit beat position and duration, use those
     if (chord.beatPosition !== undefined && chord.duration !== undefined) {
@@ -123,7 +122,7 @@ export function LeadsheetBar({
                 <span
                   key={j}
                   className={`mc-leadsheet-chord ${isInvalid ? 'mc-leadsheet-chord--invalid' : ''}`}
-                  style={getChordStyle(lc, j, bar.chords)}
+                  style={getChordStyle(lc, j)}
                 >
                   {lc.chord?.symbol ?? lc.inputText}
                 </span>
