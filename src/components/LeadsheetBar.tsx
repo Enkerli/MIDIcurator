@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from 'react';
 import type { Leadsheet, LeadsheetChord } from '../types/clip';
 
 interface LeadsheetBarProps {
@@ -7,11 +8,20 @@ interface LeadsheetBarProps {
   numBars: number;
   /** When set, use pixel widths instead of percentages (for zoom alignment). */
   drawWidth?: number;
+  /**
+   * Called when the user drags a chord boundary divider.
+   * @param barIndex       0-based bar index
+   * @param boundaryIndex  0-based index of the divider (0 = between chord 0 and 1, etc.)
+   * @param newBeatPosition New beat position (beats from bar start) of that boundary
+   */
+  onBoundaryMove?: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
 }
 
 /**
  * Bar-quantized leadsheet display showing the underlying harmony.
  * Rendered above the realized ChordBar.
+ *
+ * Drag the vertical dividers between chords to adjust their relative durations.
  */
 export function LeadsheetBar({
   leadsheet,
@@ -19,6 +29,7 @@ export function LeadsheetBar({
   ticksPerBeat,
   numBars,
   drawWidth,
+  onBoundaryMove,
 }: LeadsheetBarProps) {
   if (leadsheet.bars.length === 0) return null;
 
@@ -110,6 +121,8 @@ export function LeadsheetBar({
           );
         }
 
+        const hasMultiple = bar.chords.length > 1;
+
         return (
           <div
             key={i}
@@ -129,9 +142,135 @@ export function LeadsheetBar({
                 </span>
               );
             })}
+            {/* Drag handles between adjacent chords */}
+            {hasMultiple && onBoundaryMove && bar.chords.slice(0, -1).map((_lc, j) => {
+              // The boundary position = start of chord j+1
+              const nextChord = bar.chords[j + 1]!;
+              const boundaryBeat = nextChord.beatPosition !== undefined
+                ? nextChord.beatPosition
+                : ((j + 1) / bar.chords.length) * beatsPerBar;
+              const leftPercent = (boundaryBeat / beatsPerBar) * 100;
+
+              return (
+                <LeadsheetDragHandle
+                  key={`handle-${j}`}
+                  leftPercent={leftPercent}
+                  barIndex={i}
+                  boundaryIndex={j}
+                  beatsPerBar={beatsPerBar}
+                  chords={bar.chords}
+                  onBoundaryMove={onBoundaryMove}
+                />
+              );
+            })}
           </div>
         );
       })}
     </div>
+  );
+}
+
+// ─── Drag Handle Component ────────────────────────────────────────────────────
+
+interface LeadsheetDragHandleProps {
+  leftPercent: number;
+  barIndex: number;
+  boundaryIndex: number;
+  beatsPerBar: number;
+  chords: LeadsheetChord[];
+  onBoundaryMove: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
+}
+
+const SNAP_BEATS = 0.25; // Snap to quarter-beat grid
+
+function LeadsheetDragHandle({
+  leftPercent,
+  barIndex,
+  boundaryIndex,
+  beatsPerBar,
+  chords,
+  onBoundaryMove,
+}: LeadsheetDragHandleProps) {
+  const handleRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef<{
+    startX: number;
+    startBeat: number;
+    cellWidth: number;
+    minBeat: number;
+    maxBeat: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const cell = handleRef.current?.parentElement;
+    if (!cell) return;
+
+    const cellRect = cell.getBoundingClientRect();
+    const cellWidthPx = cellRect.width;
+
+    // Current boundary position in beats
+    const currentBeat = (leftPercent / 100) * beatsPerBar;
+
+    // Minimum: must stay at least 0.25 beats after the START of previous chord (chord[boundaryIndex])
+    const prevChord = chords[boundaryIndex]!;
+    const prevStart = prevChord.beatPosition !== undefined
+      ? prevChord.beatPosition
+      : (boundaryIndex / chords.length) * beatsPerBar;
+    const minBeat = prevStart + SNAP_BEATS;
+
+    // Maximum: must stay at least 0.25 beats before the END of the next chord (chord[boundaryIndex+1])
+    const nextChord = chords[boundaryIndex + 1]!;
+    const nextEnd = nextChord.beatPosition !== undefined && nextChord.duration !== undefined
+      ? nextChord.beatPosition + nextChord.duration
+      : ((boundaryIndex + 2) / chords.length) * beatsPerBar;
+    const maxBeat = nextEnd - SNAP_BEATS;
+
+    dragState.current = {
+      startX: e.clientX,
+      startBeat: currentBeat,
+      cellWidth: cellWidthPx,
+      minBeat,
+      maxBeat,
+    };
+    setIsDragging(true);
+
+    const onMouseMove = (me: MouseEvent) => {
+      if (!dragState.current) return;
+      const { startX, startBeat, cellWidth, minBeat, maxBeat } = dragState.current;
+      const dx = me.clientX - startX;
+      const beatDelta = (dx / cellWidth) * beatsPerBar;
+      let newBeat = startBeat + beatDelta;
+
+      // Snap to grid
+      newBeat = Math.round(newBeat / SNAP_BEATS) * SNAP_BEATS;
+
+      // Clamp
+      newBeat = Math.max(minBeat, Math.min(maxBeat, newBeat));
+
+      onBoundaryMove(barIndex, boundaryIndex, newBeat);
+    };
+
+    const onMouseUp = () => {
+      dragState.current = null;
+      setIsDragging(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [leftPercent, barIndex, boundaryIndex, beatsPerBar, chords, onBoundaryMove]);
+
+  return (
+    <div
+      ref={handleRef}
+      className={`mc-leadsheet-divider${isDragging ? ' mc-leadsheet-divider--dragging' : ''}`}
+      style={{ left: `${leftPercent}%` }}
+      onMouseDown={handleMouseDown}
+      title="Drag to adjust chord boundary"
+    />
   );
 }

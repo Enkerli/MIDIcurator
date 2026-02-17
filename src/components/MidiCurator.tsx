@@ -579,6 +579,78 @@ export function MidiCurator() {
     refreshClips();
   }, [selectedClip, db, refreshClips]);
 
+  /**
+   * Handle a drag on a chord boundary divider in LeadsheetBar.
+   * Updates the beatPosition/duration of the chords on either side of the boundary
+   * directly on the Leadsheet object (bypassing text serialization to preserve beat timing).
+   *
+   * @param barIndex       0-based bar index
+   * @param boundaryIndex  0-based divider index (boundary between chord[n] and chord[n+1])
+   * @param newBeatPosition new beat-position of chord[n+1] within the bar
+   */
+  const handleLeadsheetBoundaryMove = useCallback(async (
+    barIndex: number,
+    boundaryIndex: number,
+    newBeatPosition: number,
+  ) => {
+    if (!selectedClip?.leadsheet || !db) return;
+
+    const tpb = selectedClip.gesture.ticks_per_beat;
+    const tpBar = selectedClip.gesture.ticks_per_bar;
+    const beatsPerBar = tpBar / tpb;
+
+    // Deep-clone the leadsheet bars so we don't mutate state
+    const newBars = selectedClip.leadsheet.bars.map(bar => ({
+      ...bar,
+      chords: bar.chords.map(c => ({ ...c })),
+    }));
+
+    const bar = newBars.find(b => b.bar === barIndex);
+    if (!bar) return;
+
+    const chords = bar.chords;
+    const leftChord = chords[boundaryIndex];
+    const rightChord = chords[boundaryIndex + 1];
+    if (!leftChord || !rightChord) return;
+
+    // Determine the start of leftChord (beats from bar start)
+    const leftStart = leftChord.beatPosition !== undefined
+      ? leftChord.beatPosition
+      : (boundaryIndex / chords.length) * beatsPerBar;
+
+    // Determine the end of rightChord (beats from bar start)
+    const rightEnd = rightChord.beatPosition !== undefined && rightChord.duration !== undefined
+      ? rightChord.beatPosition + rightChord.duration
+      : ((boundaryIndex + 2) / chords.length) * beatsPerBar;
+
+    // Update left chord: keep its start, new duration up to the new boundary
+    leftChord.beatPosition = leftStart;
+    leftChord.duration = newBeatPosition - leftStart;
+
+    // Update right chord: new start at boundary, keep its end
+    rightChord.beatPosition = newBeatPosition;
+    rightChord.duration = rightEnd - newBeatPosition;
+
+    // Also initialise any chords in the bar that don't yet have explicit timing
+    // (This happens the first time the user drags, when chords were equal-divided)
+    for (let k = 0; k < chords.length; k++) {
+      const c = chords[k]!;
+      if (c.beatPosition === undefined) {
+        c.beatPosition = (k / chords.length) * beatsPerBar;
+        c.duration = beatsPerBar / chords.length;
+      }
+    }
+
+    const updatedLeadsheet: Leadsheet = {
+      ...selectedClip.leadsheet,
+      bars: newBars,
+    };
+    const updated: Clip = { ...selectedClip, leadsheet: updatedLeadsheet };
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    // No refreshClips() — no need to re-parse, and avoids re-render flicker during drag
+  }, [selectedClip, db]);
+
   const [loadingSamples, setLoadingSamples] = useState(false);
 
   const handleLoadSamples = useCallback(async () => {
@@ -898,6 +970,7 @@ export function MidiCurator() {
             onMoveBoundary={moveBoundary}
             onFilterByTag={setFilterTag}
             onLeadsheetChange={handleLeadsheetChange}
+            onLeadsheetBoundaryMove={handleLeadsheetBoundaryMove}
           />
         ) : (
           <div className="mc-main">

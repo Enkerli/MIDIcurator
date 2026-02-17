@@ -1221,6 +1221,41 @@ body {
   text-decoration: underline wavy;
 }
 
+/* Chord boundary drag handle */
+.mc-leadsheet-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+}
+
+.mc-leadsheet-divider::before {
+  content: '';
+  display: block;
+  width: 3px;
+  margin: 3px auto;
+  border-radius: 2px;
+  background: var(--mc-accent);
+  opacity: 0.5;
+  transition: opacity 0.15s, width 0.1s;
+}
+
+.mc-leadsheet-divider:hover::before,
+.mc-leadsheet-divider--dragging::before {
+  opacity: 1;
+  width: 3px;
+  background: var(--mc-accent-light);
+}
+
+.mc-leadsheet-divider--dragging {
+  cursor: ew-resize;
+}
+
 /* Leadsheet input row */
 .mc-leadsheet-input-row {
   display: flex;

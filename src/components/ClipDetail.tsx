@@ -55,6 +55,7 @@ interface ClipDetailProps {
   onMoveBoundary: (fromTick: number, toTick: number) => void;
   onFilterByTag?: (tag: string) => void;
   onLeadsheetChange?: (inputText: string) => void;
+  onLeadsheetBoundaryMove?: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
 }
 
 export function ClipDetail({
@@ -93,6 +94,7 @@ export function ClipDetail({
   onMoveBoundary,
   onFilterByTag,
   onLeadsheetChange,
+  onLeadsheetBoundaryMove,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -245,6 +247,7 @@ export function ClipDetail({
               ticksPerBeat={clip.gesture.ticks_per_beat}
               numBars={clip.gesture.num_bars}
               drawWidth={drawWidth}
+              onBoundaryMove={onLeadsheetBoundaryMove}
             />
         )}
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
