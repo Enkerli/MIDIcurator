@@ -183,10 +183,14 @@ export function ChordBar({
   const numBars = barChords.length;
   const totalTicks = totalTicksProp ?? (numBars * ticksPerBar + ticksPerBeat);
 
+  // Harmonic grid: numBars * ticksPerBar — used for bar widths so bars align
+  // with bar lines regardless of MIDI note extent (which can exceed the bar grid).
+  const harmonicTicks = numBars * ticksPerBar;
+
   // When drawWidth is provided (zoom mode), use pixel widths; otherwise percentages
   const usePixelWidths = drawWidth !== undefined;
-  const barWidthPercent = (ticksPerBar / totalTicks) * 100;
-  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
+  const barWidthPercent = (ticksPerBar / harmonicTicks) * 100;
+  const barWidthPx = usePixelWidths ? (ticksPerBar / harmonicTicks) * drawWidth : 0;
 
   const handleDoubleClick = (bar: number, segmentIndex: number) => {
     if (onChordEdit) {
