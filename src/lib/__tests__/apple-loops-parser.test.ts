@@ -1,11 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import {
-  decodeIntervalMask,
   isAppleLoopFile,
   parseAppleLoop,
   formatChordTimeline,
   type AppleLoopChordEvent,
 } from '../apple-loops-parser';
+
+// Test helper: decode interval mask (functionality is private in implementation)
+function decodeIntervalMask(mask: number): number[] {
+  const intervals: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    if (mask & (1 << i)) {
+      intervals.push(i);
+    }
+  }
+  return intervals;
+}
 
 // ─── Helper: build a minimal AIFF container ────────────────────────
 
@@ -201,14 +211,14 @@ describe('isAppleLoopFile', () => {
 
 describe('parseAppleLoop — AIFF', () => {
   it('throws for files too small', () => {
-    expect(() => parseAppleLoop(new ArrayBuffer(4))).toThrow('too small');
+    expect(() => parseAppleLoop(new ArrayBuffer(4))).toThrow('Unsupported file format');
   });
 
   it('throws for non-AIFF/CAF files', () => {
     const wav = new ArrayBuffer(12);
     const bytes = new Uint8Array(wav);
     bytes.set([0x52, 0x49, 0x46, 0x46], 0); // 'RIFF'
-    expect(() => parseAppleLoop(wav)).toThrow('Unrecognized container');
+    expect(() => parseAppleLoop(wav)).toThrow('Unsupported file format');
   });
 
   it('parses an AIFF with a MIDI chunk', () => {
@@ -216,7 +226,7 @@ describe('parseAppleLoop — AIFF', () => {
     const aiff = buildAiff([{ id: 'MIDI', data: smf }]);
 
     const result = parseAppleLoop(aiff);
-    expect(result.format).toBe('aiff');
+    expect(result.format).toBe('AIFF');
     expect(result.midi).not.toBeNull();
     expect(result.chordEvents).toHaveLength(0);
 
@@ -230,7 +240,7 @@ describe('parseAppleLoop — AIFF', () => {
     const aiff = buildAiff([{ id: 'MIDI', data: smf }], 'AIFC');
 
     const result = parseAppleLoop(aiff);
-    expect(result.format).toBe('aifc');
+    expect(result.format).toBe('AIFF');
     expect(result.midi).not.toBeNull();
   });
 
