@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import type { Clip, DetectedChord } from '../types/clip';
 import type { PlaybackState } from '../lib/playback';
 import type { TickRange } from '../lib/piano-roll';
@@ -98,9 +98,16 @@ export function ClipDetail({
   const variantCount = clips.filter(c => c.source === clip.id).length;
   const hasFilenameMatch = clip.filename.match(/(\d+)[-_\s]?bpm/i);
 
-  // Use the bar grid as the canonical total ticks, matching piano-roll.ts.
-  // This ensures ChordBar, LeadsheetBar, and PianoRoll all share the same scale.
-  const totalTicks = clip.gesture.num_bars * clip.gesture.ticks_per_bar;
+  // totalTicks = MIDI extent (last note end + one beat padding), matching piano-roll.ts.
+  // Used for segment-mode chord bar tick↔pixel mapping and playhead auto-scroll.
+  // Bar widths in ChordBar and LeadsheetBar always use numBars * ticksPerBar independently.
+  const totalTicks = useMemo(() => {
+    const { onsets, durations, ticks_per_beat, num_bars, ticks_per_bar } = clip.gesture;
+    const lastTick = onsets.length > 0
+      ? Math.max(...onsets.map((onset, i) => onset + durations[i]!))
+      : num_bars * ticks_per_bar;
+    return Math.max(lastTick + ticks_per_beat, num_bars * ticks_per_bar);
+  }, [clip.gesture]);
 
   // ─── Zoom state ────────────────────────────────────────────────────
   const [zoomLevel, setZoomLevel] = useState(1);

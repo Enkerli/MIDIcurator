@@ -178,15 +178,17 @@ export function ChordBar({
 
   if (barChords.length === 0) return null;
 
-  // Use the same total tick span as the piano roll for alignment.
-  // Falls back to bar-grid when totalTicks is not provided.
+  // Bar widths always use the harmonic grid (numBars * ticksPerBar) so bars
+  // are evenly spaced regardless of MIDI note extent.
+  // totalTicks (MIDI extent) is only used for segment-mode width calculations.
   const numBars = barChords.length;
-  const totalTicks = totalTicksProp ?? (numBars * ticksPerBar);
+  const harmonicTicks = numBars * ticksPerBar;
+  const totalTicks = totalTicksProp ?? harmonicTicks;
 
   // When drawWidth is provided (zoom mode), use pixel widths; otherwise percentages
   const usePixelWidths = drawWidth !== undefined;
-  const barWidthPercent = (ticksPerBar / totalTicks) * 100;
-  const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
+  const barWidthPercent = (1 / numBars) * 100;
+  const barWidthPx = usePixelWidths ? drawWidth / numBars : 0;
 
   const handleDoubleClick = (bar: number, segmentIndex: number) => {
     if (onChordEdit) {

@@ -68,9 +68,13 @@ export function computeLayout(
   const maxPitch = Math.min(127, Math.max(...harmonic.pitches) + 2);
   const pitchRange = maxPitch - minPitch + 1;
 
-  // Use the bar grid as the canonical total ticks so the piano roll,
-  // ChordBar, and LeadsheetBar all share the same pixel-per-tick scale.
-  const totalTicks = gesture.num_bars * gesture.ticks_per_bar;
+  // Use MIDI extent (last note end + one beat padding) as the tick scale.
+  // This ensures all notes fill the canvas without being compressed.
+  // Grid lines and bar widths use the bar grid separately.
+  const lastTick = gesture.onsets.length > 0
+    ? Math.max(...gesture.onsets.map((onset, i) => onset + gesture.durations[i]!))
+    : gesture.num_bars * gesture.ticks_per_bar;
+  const totalTicks = Math.max(lastTick + gesture.ticks_per_beat, gesture.num_bars * gesture.ticks_per_bar);
 
   const pxPerTick = (baseDrawWidth / totalTicks) * zoomLevel;
   const pxPerSemitone = drawHeight / pitchRange;
