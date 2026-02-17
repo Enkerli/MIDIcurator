@@ -241,6 +241,7 @@ export function ClipDetail({
             <LeadsheetBar
               leadsheet={clip.leadsheet}
               ticksPerBar={clip.gesture.ticks_per_bar}
+              ticksPerBeat={clip.gesture.ticks_per_beat}
               totalTicks={totalTicks}
               numBars={clip.gesture.num_bars}
               drawWidth={drawWidth}

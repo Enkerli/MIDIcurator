@@ -1,8 +1,9 @@
-import type { Leadsheet } from '../types/clip';
+import type { Leadsheet, LeadsheetChord } from '../types/clip';
 
 interface LeadsheetBarProps {
   leadsheet: Leadsheet;
   ticksPerBar: number;
+  ticksPerBeat: number;
   totalTicks: number;
   numBars: number;
   /** When set, use pixel widths instead of percentages (for zoom alignment). */
@@ -16,6 +17,7 @@ interface LeadsheetBarProps {
 export function LeadsheetBar({
   leadsheet,
   ticksPerBar,
+  ticksPerBeat,
   totalTicks,
   numBars,
   drawWidth,
@@ -29,6 +31,38 @@ export function LeadsheetBar({
     ? { width: `${barWidthPx}px` }
     : { width: `${barWidthPercent}%` };
   const containerStyle = usePixelWidths ? { width: `${drawWidth}px` } : undefined;
+
+  const beatsPerBar = ticksPerBar / ticksPerBeat;
+
+  /**
+   * Calculate chord style (position and width) based on beat timing.
+   * Falls back to equal division if timing is not specified.
+   */
+  const getChordStyle = (
+    chord: LeadsheetChord,
+    chordIndex: number,
+    chordsInBar: LeadsheetChord[],
+  ): React.CSSProperties => {
+    // If chord has explicit beat position and duration, use those
+    if (chord.beatPosition !== undefined && chord.duration !== undefined) {
+      const leftPercent = (chord.beatPosition / beatsPerBar) * 100;
+      const widthPercent = (chord.duration / beatsPerBar) * 100;
+      return {
+        position: 'absolute',
+        left: `${leftPercent}%`,
+        width: `${widthPercent}%`,
+      };
+    }
+
+    // Fallback: equal division based on totalInBar
+    const widthPercent = 100 / chord.totalInBar;
+    const leftPercent = chordIndex * widthPercent;
+    return {
+      position: 'absolute',
+      left: `${leftPercent}%`,
+      width: `${widthPercent}%`,
+    };
+  };
 
   return (
     <div className="mc-leadsheet-bar" style={containerStyle}>
@@ -80,7 +114,7 @@ export function LeadsheetBar({
           <div
             key={i}
             className="mc-leadsheet-cell"
-            style={barWidthStyle}
+            style={{ ...barWidthStyle, position: 'relative' }}
             title={`Bar ${i + 1}: ${bar.chords.map(c => c.chord?.symbol ?? c.inputText).join(' ')}`}
           >
             {bar.chords.map((lc, j) => {
@@ -89,7 +123,7 @@ export function LeadsheetBar({
                 <span
                   key={j}
                   className={`mc-leadsheet-chord ${isInvalid ? 'mc-leadsheet-chord--invalid' : ''}`}
-                  style={{ width: `${100 / lc.totalInBar}%` }}
+                  style={getChordStyle(lc, j, bar.chords)}
                 >
                   {lc.chord?.symbol ?? lc.inputText}
                 </span>

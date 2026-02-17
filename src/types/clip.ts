@@ -112,6 +112,10 @@ export interface LeadsheetChord {
   position: number;
   /** Total chords in this bar (determines time fraction: 1/total) */
   totalInBar: number;
+  /** Beat position within bar (0.0 = start, 4.0 = end for 4/4 time) */
+  beatPosition?: number;
+  /** Duration in beats (if undefined, uses equal division: beatsPerBar / totalInBar) */
+  duration?: number;
 }
 
 /** Per-bar leadsheet annotation. */
