@@ -847,7 +847,10 @@ body {
   width: 100%;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid var(--mc-border);
+  /* No border here — border causes a 2px width discrepancy between
+     the scroll container (measured by ClipDetail for bar widths) and
+     the piano roll container (measured by PianoRoll for pxPerTick).
+     The scroll container border-radius provides sufficient visual framing. */
 }
 
 .mc-piano-roll-canvas {
