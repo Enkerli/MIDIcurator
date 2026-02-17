@@ -284,6 +284,7 @@ export function MidiCurator() {
           // Convert chord events to leadsheet structure
           const leadsheet = appleLoopEventsToLeadsheet(chordEvents, numBars, result.beatsPerBar);
 
+
           await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes, leadsheet);
           continue;
         }

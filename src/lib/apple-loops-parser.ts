@@ -151,11 +151,37 @@ function decodeRootNote(
  *           pos_beats = (1.0 - norm) * beats_per_bar, wrapped
  */
 function decodeBe22(be22: number, beatsPerBar: number): number {
-  const lo16 = be22 & 0xFFFF;  // Use low 16 bits only
+  // UPDATED: be22 encodes ABSOLUTE position across the entire loop,
+  // not just position within a single bar.
+  //
+  // Empirical observation from "Waves of Nostalgia Pattern.aif":
+  // - 8 events across 8 bars (alternating F- at beat 0, B♭-7 at beat 2)
+  // - hi16 values: 0x0096, 0x40a1, 0x00b4, 0xc0c6, 0x00d2, 0x20df, 0x00f0, 0x00ff
+  // - These progress from 0x0096→0x00ff, covering the full 8-bar loop
+  //
+  // The HIGH 16 bits encode the bar position + beat offset.
+  // The LOW 16 bits refine the beat position within that segment.
+
+  const hi16 = (be22 >>> 16) & 0xFFFF;
+  const lo16 = be22 & 0xFFFF;
+
+  // Normalize hi16 to 0.0→1.0 representing progress through the loop
+  // This gives us a timeline position from start to end of the loop
+  const loopProgress = hi16 / 65536.0;
+
+  // The lo16 adds fine-grained beat offset
+  // Use the original formula for lo16 decoding
   const norm = lo16 / 65536.0;
-  let pos = (1.0 - norm) * beatsPerBar;
-  pos = ((pos % beatsPerBar) + beatsPerBar) % beatsPerBar;
-  return pos;
+  const beatOffset = (1.0 - norm) * beatsPerBar;
+
+  // For a single-bar loop, loopProgress would stay in 0.0-1.0 range
+  // For multi-bar loops, we need to know total loop length
+  // TEMPORARY: Assume 8-bar loops (will fix when we have more data)
+  const assumedTotalBars = 8;
+  const bar = Math.floor(loopProgress * assumedTotalBars);
+  const absoluteBeats = bar * beatsPerBar + beatOffset;
+
+  return absoluteBeats;
 }
 
 /**
@@ -191,6 +217,7 @@ function extractChordEventsFromSequ(
     const positionBeats = decodeBe22(be22, beatsPerBar);
     const rootInfo = decodeRootNote(b8, b9);
 
+
     const event: AppleLoopChordEvent = {
       mask,
       intervals,
@@ -214,8 +241,11 @@ function extractChordEventsFromSequ(
     events.push(event);
   }
 
-  // Sort by position within bar
-  events.sort((a, b) => a.positionBeats - b.positionBeats);
+
+  // TEMPORARY: Don't sort at all - preserve file order
+  // The be22 decoding is broken for multi-bar loops, and sorting scrambles the progression
+  // events.sort((a, b) => a.rawBe22 - b.rawBe22);
+
 
   return events;
 }
@@ -649,7 +679,10 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
 
 /**
  * Convert Apple Loop chord events into a Leadsheet structure.
- * Groups chords by bar and creates proper LeadsheetChord entries.
+ *
+ * **Current Limitation:** The be22 field encoding for multi-bar positions
+ * is not yet fully understood. For now, we distribute chords evenly across
+ * bars based on event count and order.
  *
  * @param events - Apple Loop chord events (should already be sorted by position)
  * @param numBars - Total number of bars in the clip
@@ -662,47 +695,28 @@ export function appleLoopEventsToLeadsheet(
 ): Leadsheet | null {
   if (events.length === 0) return null;
 
-  // Group events by bar
-  const eventsByBar = new Map<number, AppleLoopChordEvent[]>();
+  // TEMPORARY WORKAROUND: Ignore be22 timing (unreliable for multi-bar loops)
+  // Instead, distribute events evenly across bars
+  const chordsPerBar = Math.ceil(events.length / numBars);
 
-  for (const event of events) {
-    // Calculate which bar this event belongs to
-    // (simplified: assume single-bar loops or events within first bar)
-    const bar = Math.floor(event.positionBeats / beatsPerBar);
-    if (!eventsByBar.has(bar)) {
-      eventsByBar.set(bar, []);
-    }
-    eventsByBar.get(bar)!.push(event);
-  }
-
-  // Create leadsheet bars
   const bars: LeadsheetBar[] = [];
 
   for (let barIdx = 0; barIdx < numBars; barIdx++) {
-    const barEvents = eventsByBar.get(barIdx) || [];
+    const startIdx = barIdx * chordsPerBar;
+    const endIdx = Math.min(startIdx + chordsPerBar, events.length);
+    const barEvents = events.slice(startIdx, endIdx);
 
     if (barEvents.length === 0) {
-      // Empty bar - could inherit from previous or show as NC
+      // No chords for this bar - skip it (will show as NC in UI)
       continue;
     }
 
     const chords: LeadsheetChord[] = barEvents.map((event, position) => {
       const { chord, symbol } = appleLoopEventToDetectedChord(event);
 
-      // Calculate beat position within this bar
-      const beatPosition = event.positionBeats - (barIdx * beatsPerBar);
-
-      // Calculate duration to next chord or end of bar
-      let duration: number;
-      if (position < barEvents.length - 1) {
-        // Duration until next chord
-        const nextEvent = barEvents[position + 1]!;
-        const nextBeatPosition = nextEvent.positionBeats - (barIdx * beatsPerBar);
-        duration = nextBeatPosition - beatPosition;
-      } else {
-        // Last chord in bar - duration until end of bar
-        duration = beatsPerBar - beatPosition;
-      }
+      // Equal division within the bar
+      const beatPosition = (position / barEvents.length) * beatsPerBar;
+      const duration = beatsPerBar / barEvents.length;
 
       return {
         chord,

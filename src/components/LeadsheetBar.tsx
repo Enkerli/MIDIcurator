@@ -24,6 +24,7 @@ export function LeadsheetBar({
 }: LeadsheetBarProps) {
   if (leadsheet.bars.length === 0) return null;
 
+
   const usePixelWidths = drawWidth !== undefined;
   const barWidthPercent = (ticksPerBar / totalTicks) * 100;
   const barWidthPx = usePixelWidths ? (ticksPerBar / totalTicks) * drawWidth : 0;
