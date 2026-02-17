@@ -689,11 +689,28 @@ export function appleLoopEventsToLeadsheet(
     const chords: LeadsheetChord[] = barEvents.map((event, position) => {
       const { chord, symbol } = appleLoopEventToDetectedChord(event);
 
+      // Calculate beat position within this bar
+      const beatPosition = event.positionBeats - (barIdx * beatsPerBar);
+
+      // Calculate duration to next chord or end of bar
+      let duration: number;
+      if (position < barEvents.length - 1) {
+        // Duration until next chord
+        const nextEvent = barEvents[position + 1]!;
+        const nextBeatPosition = nextEvent.positionBeats - (barIdx * beatsPerBar);
+        duration = nextBeatPosition - beatPosition;
+      } else {
+        // Last chord in bar - duration until end of bar
+        duration = beatsPerBar - beatPosition;
+      }
+
       return {
         chord,
         inputText: symbol,
         position,
         totalInBar: barEvents.length,
+        beatPosition,
+        duration,
       };
     });
 
