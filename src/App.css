@@ -1180,6 +1180,7 @@ body {
   padding: 3px 6px;
   border-right: 1px solid var(--mc-border);
   min-height: 22px;
+  /* position: relative is set inline when bar has multiple chords */
 }
 
 .mc-leadsheet-cell:last-child {
@@ -1194,7 +1195,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* When position: absolute is set inline, this becomes a positioned flex container */
 }
 
 .mc-leadsheet-chord--nc,
