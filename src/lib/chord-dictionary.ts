@@ -225,6 +225,7 @@ const CHORD_QUALITIES: ChordQuality[] = [
   { key: "6add9", fullName: "sixth added ninth", displayName: "69", pcs: [0,4,7,9,2], binary: "101010010100", decimal: 2708, intervals: ["R","3","5","6","9"], aliases: ["6add9","69"] },
   { key: "M6#11", fullName: "sixth sharp eleventh", displayName: "M6#11", pcs: [0,4,7,9,6], binary: "100010110100", decimal: 2228, intervals: ["R","3","5","6","♯11"], aliases: ["M6#11"] },
   { key: "69#11", fullName: "major sixth ninth sharp eleventh", displayName: "69#11", pcs: [0,4,7,9,2,6], binary: "101010110100", decimal: 2740, intervals: ["R","3","5","6","9","♯11"], aliases: ["69#11"] },
+  { key: "maj7add13", fullName: "major seventh added thirteenth", displayName: "∆add13", pcs: [0,4,7,11,9], binary: "100010010101", decimal: 2197, intervals: ["R","3","5","7","13"], aliases: ["maj7add13","M7add13","∆add13","∆13no9"] },
   { key: "maj#4", fullName: "major seventh sharp eleventh", displayName: "∆#4", pcs: [0,4,7,11,6], binary: "100010110001", decimal: 2225, intervals: ["R","3","5","7","♯11"], aliases: ["maj#4","∆#11"] },
   { key: "maj9#11", fullName: "major sharp eleventh (lydian)", displayName: "∆9#11", pcs: [0,4,7,11,2,6], binary: "101010110001", decimal: 2737, intervals: ["R","3","5","7","9","♯11"], aliases: ["maj9#11","∆9#11"] },
   { key: "maj7#9#11", fullName: "major sharp ninth sharp eleventh", displayName: "∆#9#11", pcs: [0,4,7,11,3,6], binary: "100110110001", decimal: 2481, intervals: ["R","3","5","7","♯9","♯11"], aliases: ["maj7#9#11"] },
