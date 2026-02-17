@@ -68,13 +68,15 @@ export function computeLayout(
   const maxPitch = Math.min(127, Math.max(...harmonic.pitches) + 2);
   const pitchRange = maxPitch - minPitch + 1;
 
-  // Use MIDI extent (last note end + one beat padding) as the tick scale.
-  // This ensures all notes fill the canvas without being compressed.
-  // Grid lines and bar widths use the bar grid separately.
+  // Canvas scale = max(MIDI note extent, harmonic grid).
+  // The harmonic grid (numBars * ticksPerBar) anchors bar lines correctly.
+  // MIDI extent may exceed the grid if notes extend past bar boundaries.
+  // We do NOT add extra padding so notes for Apple Loops that end at
+  // the bar boundary (e.g. tick 3840 = bar 2 end) fill the canvas fully.
   const lastTick = gesture.onsets.length > 0
     ? Math.max(...gesture.onsets.map((onset, i) => onset + gesture.durations[i]!))
     : gesture.num_bars * gesture.ticks_per_bar;
-  const totalTicks = Math.max(lastTick + gesture.ticks_per_beat, gesture.num_bars * gesture.ticks_per_bar);
+  const totalTicks = Math.max(lastTick, gesture.num_bars * gesture.ticks_per_bar);
 
   const pxPerTick = (baseDrawWidth / totalTicks) * zoomLevel;
   const pxPerSemitone = drawHeight / pitchRange;

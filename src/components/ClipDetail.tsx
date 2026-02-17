@@ -98,15 +98,15 @@ export function ClipDetail({
   const variantCount = clips.filter(c => c.source === clip.id).length;
   const hasFilenameMatch = clip.filename.match(/(\d+)[-_\s]?bpm/i);
 
-  // totalTicks = MIDI extent (last note end + one beat padding), matching piano-roll.ts.
+  // totalTicks = max(MIDI note extent, harmonic grid), matching piano-roll.ts.
   // Used for segment-mode chord bar tick↔pixel mapping and playhead auto-scroll.
   // Bar widths in ChordBar and LeadsheetBar always use numBars * ticksPerBar independently.
   const totalTicks = useMemo(() => {
-    const { onsets, durations, ticks_per_beat, num_bars, ticks_per_bar } = clip.gesture;
+    const { onsets, durations, num_bars, ticks_per_bar } = clip.gesture;
     const lastTick = onsets.length > 0
       ? Math.max(...onsets.map((onset, i) => onset + durations[i]!))
       : num_bars * ticks_per_bar;
-    return Math.max(lastTick + ticks_per_beat, num_bars * ticks_per_bar);
+    return Math.max(lastTick, num_bars * ticks_per_bar);
   }, [clip.gesture]);
 
   // ─── Zoom state ────────────────────────────────────────────────────
@@ -320,7 +320,8 @@ export function ClipDetail({
         <div className="mc-debug-separator">
           First note: tick {clip.gesture.onsets[0]}, pitch {clip.harmonic.pitches[0]}
         </div>
-        <div>Last note: tick {clip.gesture.onsets[clip.gesture.onsets.length - 1]}</div>
+        <div>Last note onset: tick {clip.gesture.onsets[clip.gesture.onsets.length - 1]}</div>
+        <div>Canvas scale: {totalTicks} ticks ({clip.gesture.num_bars} bars × {clip.gesture.ticks_per_bar})</div>
         <div className="mc-debug-hint">
           Click the BPM value above to edit it if the tempo is wrong
         </div>

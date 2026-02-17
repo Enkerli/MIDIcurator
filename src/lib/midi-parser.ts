@@ -188,7 +188,19 @@ export function extractNotes(midiData: ParsedMidi): Note[] {
     }
   }
 
-  return notes.sort((a, b) => a.ticks - b.ticks);
+  const sorted = notes.sort((a, b) => a.ticks - b.ticks);
+
+  // Normalize: if the first note doesn't start at tick 0, shift all notes
+  // so the first onset lands at tick 0. This handles Apple Loops and other
+  // files where MIDI content is positioned late in a larger timeline.
+  if (sorted.length > 0 && sorted[0]!.ticks > 0) {
+    const offset = sorted[0]!.ticks;
+    for (const note of sorted) {
+      note.ticks -= offset;
+    }
+  }
+
+  return sorted;
 }
 
 export function extractBPM(midiData: ParsedMidi): number {
