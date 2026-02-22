@@ -347,6 +347,7 @@ function restoreLoopMeta(json: Record<string, unknown>): LoopMeta | undefined {
     collection:        typeof collection        === 'string' ? collection        : '',
     author:            typeof author            === 'string' ? author            : '',
     gbLoopType:        typeof gbLoopType        === 'number' ? gbLoopType        : 0,
+    hasMidi:           0,  // not stored in MIDI metadata; default to 0
   };
 }
 

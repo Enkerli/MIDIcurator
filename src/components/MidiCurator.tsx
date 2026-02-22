@@ -14,7 +14,7 @@ import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
 import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
 import { substituteSegmentPitches } from '../lib/chord-substitute';
 import { parseLeadsheet } from '../lib/leadsheet-parser';
-import { loadLoopDb, lookupLoopMeta, getLoadedDbFileName, keyTypeLabel, rootPcName } from '../lib/loop-database';
+import { loadLoopDb, lookupLoopMeta, getLoadedDbFileName, keyTypeLabel, rootPcName, gbLoopTypeLabel } from '../lib/loop-database';
 import { PROGRESSIONS, transposeProgression } from '../lib/progressions';
 import type { VoicingShape } from '../lib/progressions';
 import { generateProgressionClip } from '../lib/generate-clip';
@@ -881,7 +881,7 @@ export function MidiCurator() {
           case 'key':
             return `${rootPcName(m.rootPc)} ${keyTypeLabel(m.keyType)}`.toLowerCase().includes(q);
           case 'looptype':
-            return String(m.gbLoopType) === q;
+            return gbLoopTypeLabel(m.gbLoopType, m.hasMidi).toLowerCase() === q;
           case 'descriptor':
             return m.descriptors.split(',').some(d => d.trim().toLowerCase().includes(q));
           case 'collection':

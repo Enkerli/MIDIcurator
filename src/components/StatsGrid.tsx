@@ -373,7 +373,7 @@ export function StatsGrid({
 
           {/* Loop type row */}
           {clip.loopMeta.gbLoopType > 0 && (() => {
-            const loopLabel = gbLoopTypeLabel(clip.loopMeta!.gbLoopType);
+            const loopLabel = gbLoopTypeLabel(clip.loopMeta!.gbLoopType, clip.loopMeta!.hasMidi);
             return (
               <div className="mc-loop-meta-section">
                 <span className="mc-loop-meta-label">Loop type</span>
@@ -381,7 +381,7 @@ export function StatsGrid({
                   {onFilterByTag ? (
                     <button className="mc-loop-meta-chip mc-loop-meta-chip--looptype mc-loop-meta-chip--clickable"
                             title={`Filter by loop type "${loopLabel}"`}
-                            onClick={() => onFilterByTag(`looptype:${clip.loopMeta!.gbLoopType}`)}>
+                            onClick={() => onFilterByTag(`looptype:${loopLabel.toLowerCase()}`)}>
                       {loopLabel}
                     </button>
                   ) : (

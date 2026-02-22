@@ -169,10 +169,21 @@ export interface LoopMeta {
   /** Artist / author credit (may be empty) */
   author: string;
   /**
-   * GarageBand loop type: 0 = Classic (audio), 1 = Pattern (step-sequencer),
-   * 2 = Live Loops. Present on user-created .aif loops.
+   * Logic Pro loop type bucket (corresponds to Loop Browser colour):
+   *   0 = Audio (blue)
+   *   1 = MIDI (green) — subdivided by hasMidi: 1 = plain SMF, 6 = Pattern/step-seq
+   *   2 = Session Player (purple, dynamically generated)
    */
   gbLoopType: number;
+  /**
+   * MIDI storage format within the CAF:
+   *   0 = none (audio only)
+   *   1 = standard embedded SMF midi chunk (directly extractable)
+   *   2 = Session Player / dynamically generated
+   *   6 = step-sequencer / uuid chunk (Pattern loops; not plain SMF)
+   * Combined with gbLoopType to determine the display label.
+   */
+  hasMidi: number;
   /** JamPack / bundle name (e.g. "Modular Melodies") */
   jamPack?: string;
   /** Free-text comment from the DB */
