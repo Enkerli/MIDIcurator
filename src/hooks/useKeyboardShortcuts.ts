@@ -6,6 +6,8 @@ interface ShortcutHandlers {
   onGenerateSingle?: () => void;
   onDelete?: () => void;
   onTogglePlayback?: () => void;
+  /** Toggle the triage flag on the current clip ('x' key). */
+  onFlag?: () => void;
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
@@ -38,9 +40,14 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
         e.preventDefault();
         handlers.onTogglePlayback();
       }
+
+      if (e.key === 'x' && handlers.onFlag) {
+        e.preventDefault();
+        handlers.onFlag();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlers.onDownload, handlers.onGenerateVariants, handlers.onGenerateSingle, handlers.onDelete, handlers.onTogglePlayback]);
+  }, [handlers.onDownload, handlers.onGenerateVariants, handlers.onGenerateSingle, handlers.onDelete, handlers.onTogglePlayback, handlers.onFlag]);
 }

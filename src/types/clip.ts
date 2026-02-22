@@ -202,6 +202,8 @@ export interface Clip {
   leadsheet?: Leadsheet;
   /** Metadata from the Logic/GarageBand loop browser DB, if available at import time. */
   loopMeta?: LoopMeta;
+  /** User-set flag for triage / bulk processing (toggled with 'x'). */
+  flagged?: boolean;
 }
 
 /** A tag record in the 'tags' object store. */

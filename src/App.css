@@ -319,9 +319,19 @@ body {
   border-color: var(--mc-selected-border);
 }
 
+.mc-clip-card--flagged {
+  border-left: 3px solid var(--mc-accent);
+}
+
 .mc-clip-card-name {
   font-weight: 500;
   margin-bottom: 4px;
+}
+
+.mc-clip-card-flag {
+  color: var(--mc-accent);
+  margin-right: 5px;
+  font-size: 12px;
 }
 
 .mc-clip-card-variant-dot {
@@ -633,6 +643,86 @@ body {
   color: white;
   cursor: pointer;
   font-size: 11px;
+}
+
+.mc-btn--download-flagged {
+  padding: 4px 8px;
+  background: var(--mc-accent);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* Unknown chords panel */
+.mc-unknown-chords {
+  margin-bottom: 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mc-unknown-chords-toggle {
+  width: 100%;
+  text-align: left;
+  background: var(--mc-bg-card);
+  border: none;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--mc-text-dim);
+  cursor: pointer;
+}
+
+.mc-unknown-chords-toggle:hover {
+  color: var(--mc-text);
+}
+
+.mc-unknown-chords-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--mc-bg);
+}
+
+.mc-unknown-chord-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border-top: 1px solid var(--mc-border);
+  font-size: 11px;
+}
+
+.mc-unknown-chord-sym {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--mc-accent);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mc-unknown-chord-sym:hover {
+  text-decoration: underline;
+}
+
+.mc-unknown-chord-files {
+  color: var(--mc-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-unknown-chord-file {
+  cursor: pointer;
+}
+
+.mc-unknown-chord-file:hover {
+  color: var(--mc-text);
+  text-decoration: underline;
 }
 
 .mc-btn--add-tag {

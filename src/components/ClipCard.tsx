@@ -46,11 +46,12 @@ export function ClipCard({ clip, isSelected, onClick }: ClipCardProps) {
       tabIndex={0}
       aria-label={ariaLabel}
       aria-pressed={isSelected}
-      className={`mc-clip-card ${isSelected ? 'mc-clip-card--selected' : ''}`}
+      className={`mc-clip-card ${isSelected ? 'mc-clip-card--selected' : ''} ${clip.flagged ? 'mc-clip-card--flagged' : ''}`}
       onClick={onClick}
       onKeyDown={handleKeyDown}
     >
       <div className="mc-clip-card-name">
+        {clip.flagged && <span className="mc-clip-card-flag" aria-label="flagged" title="Flagged for triage (x to toggle)">⚑</span>}
         {clip.filename}
         {clip.source && <span className="mc-clip-card-variant-dot" aria-hidden="true">&#x25CF;</span>}
       </div>

@@ -98,6 +98,14 @@ export function MidiCurator() {
     setNewTag('');
   }, [selectedClip, newTag, db]);
 
+  const toggleFlag = useCallback(async () => {
+    if (!selectedClip || !db) return;
+    const updated = { ...selectedClip, flagged: !selectedClip.flagged };
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    refreshClips();
+  }, [selectedClip, db, refreshClips]);
+
   const deleteClip = useCallback(async () => {
     if (!selectedClip || !db) return;
     if (confirm(`Delete "${selectedClip.filename}"?`)) {
@@ -831,6 +839,9 @@ export function MidiCurator() {
             return chords.some(b => b.chord && (b.chord.symbol.includes('?') || b.chord.symbol.includes('[')));
           });
         }
+        if (q === 'flagged') {
+          return clips.filter(c => c.flagged);
+        }
         return [];
       }
 
@@ -1070,6 +1081,7 @@ export function MidiCurator() {
           onGenerateSingle: generateSingleVariant,
           onDelete: deleteClip,
           onTogglePlayback: handleTogglePlayback,
+          onFlag: toggleFlag,
         }
       : {},
   );
@@ -1088,11 +1100,13 @@ export function MidiCurator() {
       <div className="mc-layout">
         <Sidebar
           clips={filteredClips}
+          allClips={clips}
           selectedClipId={selectedClip?.id ?? null}
           filterTag={filterTag}
           onFilterChange={setFilterTag}
           onSelectClip={selectClip}
           onDownloadAll={() => downloadAllAsZip(filteredClips)}
+          onDownloadFlagged={() => downloadAllAsZip(clips.filter(c => c.flagged), 'MIDIcurator-flagged.zip')}
           onClearAll={clearAllClips}
           onFilesDropped={handleFileUpload}
           fileInputRef={fileInputRef}

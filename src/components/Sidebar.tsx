@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { type RefObject, useState, useMemo } from 'react';
 import type { Clip } from '../types/clip';
 import type { VoicingShape } from '../lib/progressions';
 import { DropZone } from './DropZone';
@@ -8,11 +8,14 @@ import { ProgressionGenerator } from './ProgressionGenerator';
 
 interface SidebarProps {
   clips: Clip[];
+  /** All clips (unfiltered), used for cross-library panels. */
+  allClips: Clip[];
   selectedClipId: string | null;
   filterTag: string;
   onFilterChange: (value: string) => void;
   onSelectClip: (clip: Clip) => void;
   onDownloadAll: () => void;
+  onDownloadFlagged?: () => void;
   onClearAll: () => void;
   onFilesDropped: (files: File[]) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -31,11 +34,13 @@ interface SidebarProps {
 
 export function Sidebar({
   clips,
+  allClips,
   selectedClipId,
   filterTag,
   onFilterChange,
   onSelectClip,
   onDownloadAll,
+  onDownloadFlagged,
   onClearAll,
   onFilesDropped,
   fileInputRef,
@@ -48,6 +53,26 @@ export function Sidebar({
   loopDbEnriched = 0,
 }: SidebarProps) {
   const loopDbInputRef = { current: null as HTMLInputElement | null };
+  const [unknownOpen, setUnknownOpen] = useState(false);
+
+  /** Map of unrecognized chord symbol → set of filenames it appears in (across allClips). */
+  const unknownChords = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const clip of allClips) {
+      const bars = clip.harmonic?.barChords ?? [];
+      for (const b of bars) {
+        const sym = b.chord?.symbol ?? '';
+        if (sym && (sym.includes('?') || sym.includes('['))) {
+          if (!map.has(sym)) map.set(sym, new Set());
+          map.get(sym)!.add(clip.filename);
+        }
+      }
+    }
+    // Sort by frequency descending
+    return [...map.entries()].sort((a, b) => b[1].size - a[1].size);
+  }, [allClips]);
+
+  const flaggedCount = useMemo(() => allClips.filter(c => c.flagged).length, [allClips]);
 
   const loopDbLabel = loopDbStatus === 'loading'
     ? '🗄 Loading…'
@@ -157,11 +182,57 @@ export function Sidebar({
           >
             ⚠ Unknown chords
           </button>
+          <button
+            className={`mc-quick-filter${filterTag === 'problem:flagged' ? ' is-active' : ''}`}
+            title="Show flagged clips (press x on any clip to flag/unflag)"
+            onClick={() => onFilterChange(filterTag === 'problem:flagged' ? '' : 'problem:flagged')}
+          >
+            ⚑ Flagged
+          </button>
+        </div>
+      )}
+
+      {/* Unknown chords panel */}
+      {unknownChords.length > 0 && (
+        <div className="mc-unknown-chords">
+          <button
+            className="mc-unknown-chords-toggle"
+            onClick={() => setUnknownOpen(o => !o)}
+            aria-expanded={unknownOpen}
+          >
+            <span>{unknownOpen ? '▾' : '▸'}</span>
+            {' '}{unknownChords.length} unknown chord{unknownChords.length !== 1 ? 's' : ''}
+          </button>
+          {unknownOpen && (
+            <ul className="mc-unknown-chords-list">
+              {unknownChords.map(([sym, files]) => (
+                <li key={sym} className="mc-unknown-chord-row">
+                  <span
+                    className="mc-unknown-chord-sym"
+                    title={`Click to filter clips containing ${sym}`}
+                    onClick={() => onFilterChange(`problem:chord`)}
+                  >
+                    {sym}
+                  </span>
+                  <span className="mc-unknown-chord-files">
+                    {[...files].sort().map((fn, i) => (
+                      <span key={fn} className="mc-unknown-chord-file"
+                        title={fn}
+                        onClick={() => onFilterChange(fn.replace(/\.mid$/i, ''))}
+                      >
+                        {i > 0 && ', '}{fn.replace(/\.mid$/i, '')}
+                      </span>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
       <div className="mc-clip-count">
-        <span>{clips.length} clips</span>
+        <span>{clips.length} clips{flaggedCount > 0 ? ` · ⚑ ${flaggedCount}` : ''}</span>
         <span className="mc-clip-count-actions">
           {clips.length > 0 && (
             <>
@@ -172,6 +243,16 @@ export function Sidebar({
               >
                 Download All
               </button>
+              {onDownloadFlagged && flaggedCount > 0 && (
+                <button
+                  className="mc-btn--download-flagged"
+                  onClick={onDownloadFlagged}
+                  aria-label={`Download ${flaggedCount} flagged clips as ZIP file`}
+                  title={`Download ${flaggedCount} flagged clip${flaggedCount !== 1 ? 's' : ''} as ZIP`}
+                >
+                  ⚑ ZIP
+                </button>
+              )}
               <button
                 className="mc-btn--clear-all"
                 onClick={onClearAll}
