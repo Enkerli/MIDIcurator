@@ -7,7 +7,7 @@ import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcura
 import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
-import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
+import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
 import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
@@ -1070,7 +1070,7 @@ export function MidiCurator() {
           filterTag={filterTag}
           onFilterChange={setFilterTag}
           onSelectClip={selectClip}
-          onDownloadAll={() => downloadAllClips(filteredClips)}
+          onDownloadAll={() => downloadAllAsZip(filteredClips)}
           onClearAll={clearAllClips}
           onFilesDropped={handleFileUpload}
           fileInputRef={fileInputRef}

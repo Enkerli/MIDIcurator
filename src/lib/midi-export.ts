@@ -295,6 +295,29 @@ export function downloadAllClips(clips: Clip[]): void {
   });
 }
 
+export async function downloadAllAsZip(clips: Clip[], zipName = 'MIDIcurator-export.zip'): Promise<void> {
+  const files = clips.map(clip => {
+    const title = clip.filename.replace(/\.mid$/i, '');
+    const midiData = createMIDI(
+      clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet,
+      title, clip.sourceFilename, clip.notes || undefined, clip.loopMeta,
+    );
+    return { name: clip.filename, data: midiData };
+  });
+
+  const zipData = createZip(files);
+  const blob = new Blob([zipData], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = zipName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function downloadVariantsAsZip(
   variants: Clip[],
   sourceFilename: string,
