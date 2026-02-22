@@ -812,6 +812,28 @@ export function MidiCurator() {
     if (fieldMatch) {
       const [, field, val] = fieldMatch;
       const q = val.toLowerCase();
+
+      // Special problem filters for QA / triage
+      if (field === 'problem') {
+        if (q === 'metadata') {
+          // Clips with no loopMeta at all, or with sparse metadata (no instrument AND no genre)
+          return clips.filter(c => {
+            if (!c.loopMeta) return true;
+            const m = c.loopMeta;
+            return !m.instrumentType && !m.genre;
+          });
+        }
+        if (q === 'chord') {
+          // Clips with at least one bar whose chord symbol contains '?' or '[' (unrecognised quality)
+          return clips.filter(c => {
+            const chords = c.harmonic?.barChords;
+            if (!chords) return false;
+            return chords.some(b => b.chord && (b.chord.symbol.includes('?') || b.chord.symbol.includes('[')));
+          });
+        }
+        return [];
+      }
+
       return clips.filter(c => {
         const m = c.loopMeta;
         if (!m) return false;

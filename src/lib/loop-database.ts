@@ -295,6 +295,30 @@ export async function loadLoopDb(buffer: ArrayBuffer, fileName: string): Promise
       ? lower.replace(/\.caf$/, '.aif')
       : lower.replace(/\.aif{1,2}$/, '.caf');
     if (sibling !== lower && !map.has(sibling)) map.set(sibling, meta);
+
+    // Some DB entries have no file extension in fileName (e.g. "Rising Up Keys 01").
+    // Register the bare stem so lookups for "Rising Up Keys 01.aif" can strip and match.
+    const stem = lower.replace(/\.(caf|aif{1,2})$/, '');
+    if (stem !== lower && !map.has(stem)) map.set(stem, meta);
+
+    // Also register by the URL-decoded basename from fileURL — handles cases where
+    // fileName has typos/double-spaces that don't match the imported .aif name
+    // (e.g. "Fluttering Darkness  Pattern 01.caf" in fileURL vs single-space in .aif).
+    if (fileURL) {
+      try {
+        const urlDecoded = decodeURIComponent(fileURL.replace(/^file:\/\//, ''));
+        const urlBase = urlDecoded.split('/').pop()!.toLowerCase();
+        if (urlBase && urlBase !== lower && !map.has(urlBase)) map.set(urlBase, meta);
+        // And the sibling of that
+        const urlSibling = urlBase.endsWith('.caf')
+          ? urlBase.replace(/\.caf$/, '.aif')
+          : urlBase.replace(/\.aif{1,2}$/, '.caf');
+        if (urlSibling !== urlBase && !map.has(urlSibling)) map.set(urlSibling, meta);
+        // And the bare stem
+        const urlStem = urlBase.replace(/\.(caf|aif{1,2})$/, '');
+        if (urlStem !== urlBase && !map.has(urlStem)) map.set(urlStem, meta);
+      } catch { /* ignore malformed URLs */ }
+    }
   };
 
   for (const row of (resultAif[0]?.values ?? [])) addRow(row as (string | number | null)[]);
@@ -335,6 +359,11 @@ export function lookupLoopMeta(importedFilename: string): LoopMeta | undefined {
   //   "Something.mid"                     → "Something.caf"  (back-fill after conversion)
   const cafName = base.replace(/\.(aif|aiff|mid|midi)$/, '.caf');
   if (_cache.has(cafName)) return _cache.get(cafName);
+
+  // Try bare stem — handles DB entries whose fileName has no extension
+  // (e.g. "Rising Up Keys 01" stored without ".caf").
+  const stem = base.replace(/\.(caf|aif{1,2}|midi?)$/, '');
+  if (stem !== base && _cache.has(stem)) return _cache.get(stem);
 
   return undefined;
 }

@@ -141,6 +141,25 @@ export function Sidebar({
         onChange={(e) => onFilterChange(e.target.value)}
       />
 
+      {clips.length > 0 && (
+        <div className="mc-quick-filters">
+          <button
+            className={`mc-quick-filter${filterTag === 'problem:metadata' ? ' is-active' : ''}`}
+            title="Show clips missing loop metadata (no instrument, genre, or location info)"
+            onClick={() => onFilterChange(filterTag === 'problem:metadata' ? '' : 'problem:metadata')}
+          >
+            ⚠ No metadata
+          </button>
+          <button
+            className={`mc-quick-filter${filterTag === 'problem:chord' ? ' is-active' : ''}`}
+            title="Show clips with unrecognised chords (marked with ? in chord bar)"
+            onClick={() => onFilterChange(filterTag === 'problem:chord' ? '' : 'problem:chord')}
+          >
+            ⚠ Unknown chords
+          </button>
+        </div>
+      )}
+
       <div className="mc-clip-count">
         <span>{clips.length} clips</span>
         <span className="mc-clip-count-actions">

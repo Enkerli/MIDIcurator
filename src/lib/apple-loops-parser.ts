@@ -648,8 +648,10 @@ export function formatChordTimeline(events: AppleLoopChordEvent[]): string {
           return `${e.rootName}${quality.displayName}`;
         }
 
-        // Fallback: show root + intervals
-        return `${e.rootName}[${e.intervals.join(',')}]`;
+        // Fallback: show root + intervals (or "Root?" for empty/degenerate masks)
+        return e.intervals.length > 1
+          ? `${e.rootName}[${e.intervals.join(',')}]`
+          : `${e.rootName}?`;
       }
 
       // No root decoded - show quality or intervals
@@ -681,9 +683,12 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
     return { chord: null, symbol };
   }
 
-  // If we have root but no quality match, create a custom symbol
+  // If we have root but no quality match (or empty/degenerate interval mask),
+  // show "Root?" rather than "Root[0,4,...]" or "Root[]"
   if (!quality) {
-    const symbol = `${event.rootName}[${event.intervals.join(',')}]`;
+    const symbol = event.intervals.length > 1
+      ? `${event.rootName}[${event.intervals.join(',')}]`
+      : `${event.rootName}?`;
     return { chord: null, symbol };
   }
 

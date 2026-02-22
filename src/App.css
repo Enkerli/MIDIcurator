@@ -239,6 +239,39 @@ body {
   font-size: 14px;
 }
 
+/* Quick-filter problem buttons */
+.mc-quick-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.mc-quick-filter {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  background: var(--mc-bg-card);
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  color: var(--mc-text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.mc-quick-filter:hover {
+  border-color: var(--mc-accent);
+  color: var(--mc-text);
+}
+
+.mc-quick-filter.is-active {
+  background: color-mix(in srgb, var(--mc-accent) 20%, transparent);
+  border-color: var(--mc-accent);
+  color: var(--mc-accent);
+}
+
 /* Clip count row */
 .mc-clip-count {
   font-size: 12px;
