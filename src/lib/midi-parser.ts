@@ -1,5 +1,5 @@
 import type { MidiEvent, ParsedMidi } from '../types/midi';
-import type { Note } from '../types/clip';
+import type { Note, LoopMeta } from '../types/clip';
 
 export function parseMIDI(arrayBuffer: ArrayBuffer): ParsedMidi {
   const view = new DataView(arrayBuffer);
@@ -269,6 +269,8 @@ export interface McuratorMetadata {
   variantOf?: string;
   /** Clip notes / generation info (for variants). */
   clipNotes?: string;
+  /** Loop metadata restored from an embedded MCURATOR:v1 loopmeta event. */
+  loopMeta?: LoopMeta;
 }
 
 const MARKER_PREFIX = 'MCURATOR v1 SEG';
@@ -308,6 +310,47 @@ function parseTextJson(text: string): Record<string, unknown> | null {
 }
 
 /**
+ * Reconstruct a LoopMeta object from a raw JSON payload (the 'loopmeta' text event).
+ * All required fields must be present and correctly typed; returns undefined if not.
+ */
+function restoreLoopMeta(json: Record<string, unknown>): LoopMeta | undefined {
+  const { cafFilename, rootPc, keyType, tempo, numberOfBeats,
+          timeSignatureTop, timeSignatureBottom,
+          instrumentType, instrumentSubType, genre, descriptors, collection, author,
+          gbLoopType } = json;
+
+  if (
+    typeof cafFilename !== 'string' ||
+    typeof rootPc !== 'number' ||
+    typeof keyType !== 'number' ||
+    typeof tempo !== 'number' ||
+    typeof numberOfBeats !== 'number' ||
+    typeof timeSignatureTop !== 'number' ||
+    typeof timeSignatureBottom !== 'number'
+  ) return undefined;
+
+  const kt = keyType as 0 | 1 | 2 | 3;
+  if (kt < 0 || kt > 3) return undefined;
+
+  return {
+    cafFilename,
+    rootPc,
+    keyType: kt,
+    tempo,
+    numberOfBeats,
+    timeSignatureTop,
+    timeSignatureBottom,
+    instrumentType:    typeof instrumentType    === 'string' ? instrumentType    : '',
+    instrumentSubType: typeof instrumentSubType === 'string' ? instrumentSubType : '',
+    genre:             typeof genre             === 'string' ? genre             : '',
+    descriptors:       typeof descriptors       === 'string' ? descriptors       : '',
+    collection:        typeof collection        === 'string' ? collection        : '',
+    author:            typeof author            === 'string' ? author            : '',
+    gbLoopType:        typeof gbLoopType        === 'number' ? gbLoopType        : 0,
+  };
+}
+
+/**
  * Extract MCURATOR segmentation metadata from a parsed MIDI file.
  * Scans all tracks for MCURATOR marker and text meta events.
  */
@@ -334,6 +377,7 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
   let leadsheetTiming: Record<string, [number, number]> | undefined;
   let variantOf: string | undefined;
   let clipNotes: string | undefined;
+  let loopMeta: LoopMeta | undefined;
   for (const te of textEvents) {
     const json = parseTextJson(te.text);
     if (!json) continue;
@@ -355,6 +399,9 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
         }
         if (Object.keys(timing).length > 0) leadsheetTiming = timing;
       }
+    } else if (json.type === 'loopmeta') {
+      // Restore Apple Loops metadata from embedded MIDI text event
+      loopMeta = restoreLoopMeta(json);
     }
   }
 
@@ -395,10 +442,10 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
     }
   }
 
-  if (segmentMap.size === 0 && !fileInfo && !leadsheetText && !variantOf && !clipNotes) return null;
+  if (segmentMap.size === 0 && !fileInfo && !leadsheetText && !variantOf && !clipNotes && !loopMeta) return null;
 
   const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
   const boundaries = segments.map(s => s.tick);
 
-  return { boundaries, segments, fileInfo, leadsheetText, leadsheetTiming, variantOf, clipNotes };
+  return { boundaries, segments, fileInfo, leadsheetText, leadsheetTiming, variantOf, clipNotes, loopMeta };
 }

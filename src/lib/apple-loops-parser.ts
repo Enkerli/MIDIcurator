@@ -38,8 +38,13 @@ export interface AppleLoopParseResult {
   midi: ArrayBuffer | null;
   /** Chord events extracted from Sequ chunk. */
   chordEvents: AppleLoopChordEvent[];
-  /** Beats per bar (default 4, could be parsed from meta). */
+  /** Beats per bar from basc chunk (default 4). */
   beatsPerBar: number;
+  /**
+   * Total number of beats in the loop from the basc chunk.
+   * Divide by beatsPerBar to get numBars.  May be undefined for CAF files.
+   */
+  numberOfBeats?: number;
   /** Format: "AIFF" or "CAF". */
   format: string;
 }
@@ -145,21 +150,34 @@ function decodeRootNote(
 }
 
 /**
- * Decode be22 field into beat position within bar.
- * Use low 16 bits only (high 16 bits may contain other data).
- * Empirically determined encoding (from LpTmE* test corpus, confirmed on all test files):
- *   absoluteTick = (byte[0x19] - 0x96) * 128
+ * Decode the 3-byte position field at record offset 0x18 into an absolute tick.
  *
- * Where byte[0x19] is the second byte of the u32-BE field at record offset 0x18.
- * Origin 0x96 = tick 0, scale = 128 ticks/unit (at 480ppq, 1 bar 4/4 = 15 units = 1920 ticks).
- * The first byte (0x18) is NOT a timing field — it encodes other metadata.
+ * Encoding (fully reverse-engineered from LpTm* + 360 Blazing Clusters corpus):
+ *
+ *   Bytes at record offsets [0x18, 0x19, 0x1a]:
+ *     b18 = fractional adjustment byte (negated: reduces tick below the integer)
+ *     b19 = low byte of integer position unit (u16LE with b1a)
+ *     b1a = high byte of integer position unit
+ *
+ *   Formula (at 480ppq):
+ *     main = b19 | (b1a << 8)          // u16LE from bytes 0x19 and 0x1a
+ *     tick = (main - 0x96) * 128 - b18 * 8
+ *
+ *   Origin: main=0x96 → tick 0. Scale: 128 ticks per integer unit.
+ *   Fractional: b18 * 8 ticks subtracted (b18=0x0f → −120 ticks = −0.25 beat).
+ *   At 480ppq, 1 bar (4/4) = 1920 ticks = 15 integer units.
+ *
+ *   The old formula read only bytes[0x18..0x19] as LE u16 (= b18 | (b19<<8))
+ *   and applied `(u16 - 0x9600) * 128 >> 8`.  That works for loops < 16 bars
+ *   (b1a=0) but silently overflows once b1a > 0 (beats ≥ 32 in 4/4).
+ *
+ * @param b18  byte at record offset 0x18 (fractional, negated)
+ * @param b19  byte at record offset 0x19 (low integer byte)
+ * @param b1a  byte at record offset 0x1a (high integer byte)
  */
-function decodePositionTick(be22: number): number {
-  // byte[0x19] is the second byte of the big-endian u32 at record offset 0x18
-  const b19 = (be22 >>> 16) & 0xFF;
-  const ORIGIN = 0x96; // tick 0 anchor
-  const UNIT = 128;    // ticks per position unit (at 480ppq)
-  return (b19 - ORIGIN) * UNIT;
+function decodePositionTick(b18: number, b19: number, b1a: number): number {
+  const main = b19 | (b1a << 8);
+  return (main - 0x96) * 128 - b18 * 8;
 }
 
 /**
@@ -171,9 +189,10 @@ function decodePositionTick(be22: number): number {
  *   +0x04: u16 LE mask (12-bit pitch-class bitmask)
  *   +0x08: u8 b8 (accidental / scheme marker)
  *   +0x09: u8 b9 (pitch class or accidental hint)
- *   +0x18: u32 BE — high byte (0x18) is non-timing metadata;
- *                   second byte (0x19) encodes absolute tick position:
- *                   tick = (byte[0x19] - 0x96) * 128  (at 480ppq)
+ *   +0x18: u8 b18 (fractional, negated: subtract b18*8 ticks)
+ *   +0x19: u8 b19 (low byte of integer position unit)
+ *   +0x1a: u8 b1a (high byte — needed for loops > ~16 bars at 4/4)
+ *           tick = (b19|(b1a<<8) − 0x96) × 128 − b18 × 8  (at 480ppq)
  */
 function extractChordEventsFromSequ(
   data: Uint8Array,
@@ -194,12 +213,17 @@ function extractChordEventsFromSequ(
     const mask = view.getUint16(off + 0x04, true); // Little-endian
     const b8 = data[off + 0x08]!;
     const b9 = data[off + 0x09]!;
-    const be22 = view.getUint32(off + 0x18, false); // Big-endian u32
+    // Position field: 3-byte value at record offsets 0x18..0x1a (see decodePositionTick)
+    const posB18 = data[off + 0x18]!;  // fractional byte (negated)
+    const posB19 = data[off + 0x19]!;  // low integer byte
+    const posB1a = data[off + 0x1a]!;  // high integer byte (overflow for loops > 16 bars)
+    // Keep rawBe22 for debugging (full big-endian u32 at 0x18)
+    const be22 = view.getUint32(off + 0x18, false);
 
     const intervals = decodeIntervalMask(mask);
 
     // Decode absolute tick position, scaled to actual ppq
-    const absoluteTick = decodePositionTick(be22) * tickScale;
+    const absoluteTick = decodePositionTick(posB18, posB19, posB1a) * tickScale;
     const positionBeats = absoluteTick / ticksPerBeat;
 
     const rootInfo = decodeRootNote(b8, b9);
@@ -212,6 +236,10 @@ function extractChordEventsFromSequ(
       b8,
       b9,
     };
+
+    // Skip note-tracker bookmarks: mask=0, b8=0 — these are position markers
+    // attached to individual notes, not chord annotations.
+    if (mask === 0 && b8 === 0) continue;
 
     if (rootInfo) {
       if ('accidentalHint' in rootInfo) {
@@ -353,8 +381,26 @@ function parseAiff(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
   // Parse top-level IFF chunks starting at offset 12
   const chunks = parseIffChunks(data, 12);
 
+  let beatsPerBar = 4;
+  let numberOfBeats: number | undefined;
+
   // Look for MIDI and Sequ chunks
   for (const chunk of chunks) {
+    // Parse 'basc' chunk: Apple Loops beat/bar metadata
+    // Layout (big-endian):
+    //   bytes [0:4]   = unknown (version/flags)
+    //   bytes [4:8]   = numberOfBeats (uint32 BE)
+    //   bytes [8:12]  = unknown
+    //   bytes [12:13] = timeSigNumerator (uint16 BE, e.g. 4)
+    //   bytes [14:15] = timeSigDenominator (uint16 BE, e.g. 4)
+    if (chunk.id === 'basc' && chunk.data.length >= 16) {
+      const bascView = new DataView(chunk.data.buffer, chunk.data.byteOffset, chunk.data.byteLength);
+      const beats = bascView.getUint32(4, false);  // big-endian
+      const timeSigN = bascView.getUint16(12, false);
+      if (beats > 0) numberOfBeats = beats;
+      if (timeSigN > 0) beatsPerBar = timeSigN;
+    }
+
     // Check for top-level Sequ chunks (user-generated loops)
     if (chunk.id === 'Sequ') {
       const events = extractChordEventsFromSequ(chunk.data, APPLE_LOOPS_TPB);
@@ -403,7 +449,7 @@ function parseAiff(arrayBuffer: ArrayBuffer): AppleLoopParseResult {
     midi = extractEmbeddedMidi(data);
   }
 
-  return { midi, chordEvents: allChordEvents, beatsPerBar: 4, format: 'AIFF' };
+  return { midi, chordEvents: allChordEvents, beatsPerBar, numberOfBeats, format: 'AIFF' };
 }
 
 // ─── CAF container ──────────────────────────────────────────────────
@@ -689,11 +735,30 @@ export function appleLoopEventsToLeadsheet(
 
   const bars: LeadsheetBar[] = [];
 
+  // Track the last chord seen so we can extend it across empty bars.
+  let lastChord: LeadsheetChord | null = null;
+
   for (let barIdx = 0; barIdx < numBars; barIdx++) {
     const barEvents = barGroups.get(barIdx);
-    if (!barEvents || barEvents.length === 0) continue;
 
-    // Compute duration for each chord = distance to next chord (or to end of bar)
+    if (!barEvents || barEvents.length === 0) {
+      // No events in this bar — extend the previous chord across the whole bar.
+      if (lastChord) {
+        const carried: LeadsheetChord = {
+          ...lastChord,
+          position: 0,
+          totalInBar: 1,
+          beatPosition: 0,
+          duration: beatsPerBar,
+        };
+        bars.push({ bar: barIdx, chords: [carried], isRepeat: false });
+      }
+      continue;
+    }
+
+    // Compute duration for each chord = distance to next chord (or to end of bar).
+    // For the last chord in the bar, extend to the start of the *next* event across
+    // all bars (not just within this bar), so chords span bar boundaries naturally.
     const barEnd = (barIdx + 1) * beatsPerBar;
 
     const chords: LeadsheetChord[] = barEvents.map((event, position) => {
@@ -702,7 +767,7 @@ export function appleLoopEventsToLeadsheet(
       // beatPosition within the bar (0 = bar start)
       const beatPosition = event.positionBeats - barIdx * beatsPerBar;
 
-      // Duration = distance to next chord's position, or to bar end
+      // Duration = distance to next chord in this bar, or fill to bar end.
       const nextEvent = barEvents[position + 1];
       const nextBeat = nextEvent
         ? nextEvent.positionBeats - barIdx * beatsPerBar
@@ -718,6 +783,8 @@ export function appleLoopEventsToLeadsheet(
         duration,
       };
     });
+
+    lastChord = chords[chords.length - 1]!;
 
     bars.push({
       bar: barIdx,

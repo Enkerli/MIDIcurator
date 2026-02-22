@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import type { BarChordInfo, ChordSegment, DetectedChord, SegmentChordInfo } from '../types/clip';
+import type { BarChordInfo, ChordSegment, DetectedChord, Gesture, Harmonic, Leadsheet, SegmentChordInfo } from '../types/clip';
 import type { TickRange } from '../lib/piano-roll';
+import { buildChordWindows } from '../lib/piano-roll';
+import { describeSegmentDegrees } from '../lib/chord-detect';
 
 interface ChordBarProps {
   barChords: BarChordInfo[];
@@ -15,6 +17,10 @@ interface ChordBarProps {
   onChordEdit?: (startTick: number, endTick: number, newChordSymbol: string) => void;
   /** When present, render segment-based view instead of bar-based view. */
   segmentChords?: SegmentChordInfo[];
+  /** Full gesture + harmonic + leadsheet — needed for texture analysis in segment view. */
+  gesture?: Gesture;
+  harmonic?: Harmonic;
+  leadsheet?: Leadsheet;
 }
 
 /**
@@ -164,13 +170,16 @@ function isSegmentSelected(
 export function ChordBar({
   barChords,
   ticksPerBar,
-  ticksPerBeat: _ticksPerBeat,
+  ticksPerBeat,
   totalTicks: totalTicksProp,
   drawWidth,
   selectionRange,
   onSegmentClick,
   onChordEdit,
   segmentChords,
+  gesture,
+  harmonic,
+  leadsheet,
 }: ChordBarProps) {
   // Track which cell/segment is being edited: { bar, segmentIndex } or null
   // segmentIndex = -1 means editing the whole bar (single-chord cell)
@@ -218,8 +227,66 @@ export function ChordBar({
     ? { width: `${drawWidth}px` }
     : undefined;
 
+  // Build chord windows once — used for texture analysis in both rendering paths
+  const chordWindows = (leadsheet && gesture)
+    ? buildChordWindows(leadsheet, ticksPerBar, ticksPerBeat, totalTicks)
+    : null;
+
+  /**
+   * Collect MIDI pitches sounding within [startTick, endTick).
+   * Includes notes that onset in the range or sustain into it from before.
+   */
+  const getSegmentPitches = (startTick: number, endTick: number): number[] => {
+    if (!gesture || !harmonic) return [];
+    const pitches: number[] = [];
+    for (let i = 0; i < gesture.onsets.length; i++) {
+      const onset = gesture.onsets[i]!;
+      const dur   = gesture.durations[i]!;
+      if ((onset >= startTick && onset < endTick) ||
+          (onset < startTick && onset + dur > startTick)) {
+        pitches.push(harmonic.pitches[i]!);
+      }
+    }
+    return pitches;
+  };
+
+  /**
+   * Return the best informative label for a tick range:
+   *   - When a leadsheet is present: degree description ("R 3 ♭7") or null (NC/empty segment).
+   *     No texture heuristic fallback — the leadsheet context is authoritative.
+   *   - When no leadsheet: texture heuristic (block/arp/etc.) if gesture+harmonic available.
+   */
+  /**
+   * When a leadsheet is present: returns the degree label (replaces chord symbol).
+   * When no leadsheet: returns null (chord symbol is kept; use getTextureGlyph for decoration).
+   */
+  const getSegmentLabel = (startTick: number, endTick: number): string | null => {
+    if (!gesture || !harmonic || !chordWindows) return null;
+    const segPitches = getSegmentPitches(startTick, endTick);
+
+    // Try candidate windows in priority order: midpoint, then start, then end.
+    // This handles boundary segments that straddle two chord windows — the
+    // midpoint window may be wrong if the segment is very short.
+    const mid = (startTick + endTick) / 2;
+    const candidatePositions = [mid, startTick + 1, endTick - 1];
+    const seenWindowStarts = new Set<number>();
+
+    for (const pos of candidatePositions) {
+      const w = chordWindows.find(w => w.startTick <= pos && w.endTick > pos);
+      if (!w || w.rootPc === null) continue;
+      if (seenWindowStarts.has(w.startTick)) continue; // already tried this window
+      seenWindowStarts.add(w.startTick);
+      const degrees = describeSegmentDegrees(segPitches, w.rootPc, w.qualityKey ?? null);
+      if (degrees) return degrees;
+    }
+    return null;
+  };
+
+  // getTextureGlyph removed — texture feature disabled pending calibration
+
   // ─── Segment-based rendering (when segmentation boundaries exist) ────
   if (segmentChords && segmentChords.length > 0) {
+
     return (
       <div className="mc-chord-bar" style={containerStyle}>
         {segmentChords.map((seg) => {
@@ -228,22 +295,38 @@ export function ChordBar({
             && selectionRange.startTick === seg.startTick
             && selectionRange.endTick === seg.endTick;
 
+          const segmentLabel = getSegmentLabel(seg.startTick, seg.endTick);
+          const textureGlyph = null; // disabled pending calibration
+
+          const titleSuffix = segmentLabel ? ` · ${segmentLabel}` : '';
+          const title = seg.chord
+            ? `Segment ${seg.index + 1}: ${seg.chord.symbol} (${seg.chord.qualityName})${titleSuffix}`
+            : `Segment ${seg.index + 1}: ${seg.pitchClasses.length > 0 ? `[${seg.pitchClasses.join(',')}]` : 'no notes'}${titleSuffix}`;
+
           return (
             <div
               key={seg.index}
-              className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isSelected ? 'mc-chord-bar-cell--selected' : ''}`}
+              className={`mc-chord-bar-cell mc-chord-bar-cell--segment-mode ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isSelected ? 'mc-chord-bar-cell--selected' : ''}`}
               style={{
                 ...widthStyle(seg.endTick - seg.startTick),
                 cursor: onSegmentClick ? 'pointer' : undefined,
               }}
-              title={seg.chord
-                ? `Segment ${seg.index + 1}: ${seg.chord.symbol} (${seg.chord.qualityName})`
-                : `Segment ${seg.index + 1}: ${seg.pitchClasses.length > 0 ? `[${seg.pitchClasses.join(',')}]` : 'no notes'}`}
+              title={title}
               onClick={onSegmentClick ? () => onSegmentClick(seg.startTick, seg.endTick) : undefined}
             >
-              <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>
-                {displayText}
-              </span>
+              {segmentLabel ? (
+                // Leadsheet context: degree label replaces chord symbol (symbol already
+                // shown in the leadsheet bar above).
+                <span className="mc-chord-bar-degrees">{segmentLabel}</span>
+              ) : (
+                // No leadsheet: show chord symbol, with optional texture glyph alongside.
+                <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>
+                  {displayText}
+                  {textureGlyph && (
+                    <span className="mc-chord-bar-texture-glyph">{textureGlyph}</span>
+                  )}
+                </span>
+              )}
             </div>
           );
         })}
@@ -315,11 +398,14 @@ export function ChordBar({
           selectionRange.endTick === barEndTick;
         const isEditing = editingCell?.bar === bc.bar && editingCell?.segmentIndex === -1;
 
+        const segmentLabel = !isEditing ? getSegmentLabel(barStartTick, barEndTick) : null;
+
         const extrasInfo = hasExtras && effectiveChord?.extras
           ? ` | extras: [${effectiveChord.extras.join(',')}]`
           : '';
+        const textureSuffix = segmentLabel ? ` · ${segmentLabel}` : '';
         const titleText = effectiveChord
-          ? `Bar ${bc.bar + 1}: ${effectiveChord.symbol} (${effectiveChord.qualityName})${extrasInfo}`
+          ? `Bar ${bc.bar + 1}: ${effectiveChord.symbol} (${effectiveChord.qualityName})${extrasInfo}${textureSuffix}`
           : bc.pitchClasses.length > 0
             ? `Bar ${bc.bar + 1}: unrecognized structure [${bc.pitchClasses.sort((a, b) => a - b).join(',')}]`
             : `Bar ${bc.bar + 1}: no notes`;
@@ -327,7 +413,7 @@ export function ChordBar({
         return (
           <div
             key={bc.bar}
-            className={`mc-chord-bar-cell ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isBarSelected ? 'mc-chord-bar-cell--selected' : ''} ${isEditing ? 'mc-chord-bar-cell--editing' : ''}`}
+            className={`mc-chord-bar-cell mc-chord-bar-cell--segment-mode ${isEmpty ? 'mc-chord-bar-cell--empty' : ''} ${isBarSelected ? 'mc-chord-bar-cell--selected' : ''} ${isEditing ? 'mc-chord-bar-cell--editing' : ''}`}
             style={{
               ...(usePixelWidths ? { width: `${barWidthPx}px` } : { width: `${barWidthPercent}%` }),
               cursor: onSegmentClick ? 'pointer' : undefined,
@@ -343,7 +429,13 @@ export function ChordBar({
                 onCancel={handleEditCancel}
               />
             ) : (
-              <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>{displayText}</span>
+              <>
+                {segmentLabel ? (
+                  <span className="mc-chord-bar-degrees">{segmentLabel}</span>
+                ) : (
+                  <span className={`mc-chord-bar-symbol ${hasExtras ? 'mc-chord-bar-symbol--has-extras' : ''}`}>{displayText}</span>
+                )}
+              </>
             )}
           </div>
         );

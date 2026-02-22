@@ -63,10 +63,10 @@ const QUALITY_ALIASES: Record<string, string> = {
   '-7': 'min7',
 
   // Half-diminished (minor 7 flat 5)
-  'm7b5': 'min7b5',
-  'ø': 'min7b5',
-  'ø7': 'min7b5',
-  '-7b5': 'min7b5',
+  'm7b5': 'm7b5',
+  'ø': 'm7b5',
+  'ø7': 'm7b5',
+  '-7b5': 'm7b5',
 
   // Diminished 7th
   'dim7': 'dim7',
@@ -84,9 +84,9 @@ const QUALITY_ALIASES: Record<string, string> = {
 
   // 6th chords
   '6': '6',
-  'm6': 'min6',
-  'min6': 'min6',
-  '-6': 'min6',
+  'm6': 'm6',
+  'min6': 'm6',
+  '-6': 'm6',
 
   // 9th chords
   '9': '9',

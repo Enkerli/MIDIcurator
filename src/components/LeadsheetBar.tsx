@@ -106,6 +106,42 @@ export function LeadsheetBar({
           );
         }
 
+        // Detect a carried chord: a single-chord bar whose chord is identical
+        // to the previous bar's last chord (same root + quality). These arise
+        // when Apple Loop chords span multiple bars and we extend them forward.
+        // Display a continuation marker instead of repeating the symbol.
+        const prevBar = i > 0 ? leadsheet.bars.find(b => b.bar === i - 1) : null;
+        const prevLastChordObj = prevBar ? prevBar.chords[prevBar.chords.length - 1] : null;
+        const prevChord = prevLastChordObj?.chord ?? null;
+        const thisChord = bar.chords.length === 1 ? bar.chords[0]!.chord : null;
+        const isCarried = !bar.isRepeat
+          && thisChord !== null
+          && prevChord !== null
+          && thisChord.root === prevChord.root
+          && thisChord.qualityKey === prevChord.qualityKey;
+
+        if (isCarried) {
+          // If the source chord started in the last quarter of the previous bar
+          // (beatPosition > 75%), its label is unreadable in that tiny sliver.
+          // Show the symbol here instead of a dash, so it's legible.
+          const prevBeatPos = prevLastChordObj?.beatPosition;
+          const sourceLate = prevBeatPos !== undefined && prevBeatPos >= beatsPerBar * 0.75;
+          return (
+            <div
+              key={i}
+              className={`mc-leadsheet-cell mc-leadsheet-cell--carried${sourceLate ? ' mc-leadsheet-cell--carried-label' : ''}`}
+              style={barWidthStyle}
+              title={`Bar ${i + 1}: ${thisChord!.symbol} (continued)`}
+            >
+              {sourceLate ? (
+                <span className="mc-leadsheet-chord mc-leadsheet-chord--carried-label">{thisChord!.symbol}</span>
+              ) : (
+                <span className="mc-leadsheet-chord mc-leadsheet-chord--carried">—</span>
+              )}
+            </div>
+          );
+        }
+
         // Single or multi-chord bar
         const isNc = bar.chords.length === 1 && !bar.chords[0]!.chord && bar.chords[0]!.inputText.toUpperCase() === 'NC';
         if (isNc) {

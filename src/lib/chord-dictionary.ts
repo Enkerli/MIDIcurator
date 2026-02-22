@@ -143,6 +143,43 @@ export function spellInChordContext(pc: number, rootPc: number, rootNameStr?: st
   return spellRoot(p, rootPc);
 }
 
+/**
+ * Build a map from absolute pitch class → correctly spelled note name for all
+ * chord tones in a given chord, using the quality's own interval labels to
+ * determine flat/sharp direction rather than the root's key signature.
+ *
+ * This correctly spells e.g. A♭ (not G♯) as the ♭5 of Dm7♭5, even though
+ * D is a "sharp key" in key-signature terms.
+ *
+ * Notes not in the template (NCTs) are not included; callers should fall back
+ * to `spellInChordContext` for those.
+ */
+export function buildChordToneSpellingMap(
+  rootPc: number,
+  quality: ChordQuality,
+): Map<number, string> {
+  const map = new Map<number, string>();
+  const r = ((rootPc % 12) + 12) % 12;
+  for (let i = 0; i < quality.pcs.length; i++) {
+    const relPc = quality.pcs[i]!;
+    const absPc = (r + relPc) % 12;
+    const interval = quality.intervals[i] ?? '';
+    let name: string;
+    if (interval.includes('♭') || interval.includes('b')) {
+      // Flat interval → always spell flat
+      name = rootNameFlat(absPc);
+    } else if (interval.includes('♯') || interval.includes('#')) {
+      // Sharp interval → always spell sharp
+      name = rootNameSharp(absPc);
+    } else {
+      // Unaltered interval — use root-context spelling
+      name = spellInChordContext(absPc, r);
+    }
+    map.set(absPc, name);
+  }
+  return map;
+}
+
 // ─── Fingerprint utilities ─────────────────────────────────────────────
 
 /**
@@ -208,11 +245,20 @@ const CHORD_QUALITIES: ChordQuality[] = [
   { key: "m6", fullName: "minor sixth", displayName: "-6", pcs: [0,3,7,9], binary: "100100010100", decimal: 2324, intervals: ["R","♭3","5","6"], aliases: ["m6","-6"] },
   { key: "maj9", fullName: "major ninth", displayName: "∆9", pcs: [0,4,7,11,2], binary: "101010010001", decimal: 2705, intervals: ["R","3","5","7","9"], aliases: ["maj9","M9","∆9"] },
   { key: "min9", fullName: "minor ninth", displayName: "-9", pcs: [0,3,7,10,2], binary: "101100010010", decimal: 2834, intervals: ["R","♭3","5","♭7","9"], aliases: ["min9","m9","-9"] },
+  { key: "m9add13", fullName: "minor ninth added thirteenth", displayName: "-9add13", pcs: [0,3,7,10,2,9], binary: "101100010110", decimal: 2838, intervals: ["R","♭3","5","♭7","9","13"], aliases: ["m9add13","m13no11","-9add13"] },
   { key: "maj11", fullName: "major eleventh", displayName: "∆11", pcs: [0,4,7,11,2,5], binary: "101011010001", decimal: 2769, intervals: ["R","3","5","7","9","11"], aliases: ["maj11","M11","∆11"] },
   { key: "min11", fullName: "minor eleventh", displayName: "-11", pcs: [0,3,7,10,2,5], binary: "101101010010", decimal: 2898, intervals: ["R","♭3","5","♭7","9","11"], aliases: ["min11","m11","-11"] },
   { key: "maj13", fullName: "major thirteenth", displayName: "∆13", pcs: [0,4,7,11,2,5,9], binary: "101011010101", decimal: 2773, intervals: ["R","3","5","7","9","11","13"], aliases: ["maj13","M13","∆13"] },
   { key: "min13", fullName: "minor thirteenth", displayName: "-13", pcs: [0,3,7,10,2,5,9], binary: "101101010110", decimal: 2902, intervals: ["R","♭3","5","♭7","9","11","13"], aliases: ["min13","m13","-13"] },
   { key: "sus2", fullName: "suspended second", displayName: "sus2", pcs: [0,2,7], binary: "101000010000", decimal: 2576, intervals: ["R","2","5"], aliases: ["sus2"] },
+  { key: "7sus2", fullName: "dominant seventh suspended second", displayName: "7sus2", pcs: [0,2,7,10], binary: "101000010010", decimal: 2578, intervals: ["R","2","5","♭7"], aliases: ["7sus2"] },
+  { key: "M7sus2", fullName: "major seventh suspended second", displayName: "M7sus2", pcs: [0,2,7,11], binary: "101000010001", decimal: 2577, intervals: ["R","2","5","7"], aliases: ["M7sus2"] },
+  { key: "13sus2", fullName: "dominant thirteenth suspended second", displayName: "13sus2", pcs: [0,2,7,10,9], binary: "101000010110", decimal: 2582, intervals: ["R","2","5","♭7","13"], aliases: ["13sus2"] },
+  { key: "M13sus2", fullName: "major thirteenth suspended second", displayName: "M13sus2", pcs: [0,2,7,11,9], binary: "101000010101", decimal: 2581, intervals: ["R","2","5","7","13"], aliases: ["M13sus2"] },
+  { key: "7#11sus2", fullName: "lydian dominant suspended second", displayName: "7#11sus2", pcs: [0,2,7,10,6], binary: "101000110010", decimal: 2610, intervals: ["R","2","5","♭7","♯11"], aliases: ["7#11sus2"] },
+  { key: "M7#11sus2", fullName: "lydian major seventh suspended second", displayName: "M7#11sus2", pcs: [0,2,7,11,6], binary: "101000110001", decimal: 2609, intervals: ["R","2","5","7","♯11"], aliases: ["M7#11sus2"] },
+  { key: "13#11sus2", fullName: "lydian dominant thirteenth suspended second", displayName: "13#11sus2", pcs: [0,2,6,7,9,10], binary: "101000110110", decimal: 2614, intervals: ["R","2","♯11","5","13","♭7"], aliases: ["13#11sus2"] },
+  { key: "M13#11sus2", fullName: "lydian major thirteenth suspended second", displayName: "M13#11sus2", pcs: [0,2,6,7,9,11], binary: "101000110101", decimal: 2613, intervals: ["R","2","♯11","5","13","7"], aliases: ["M13#11sus2"] },
   { key: "sus4", fullName: "suspended fourth", displayName: "sus4", pcs: [0,5,7], binary: "100001010000", decimal: 2128, intervals: ["R","4","5"], aliases: ["sus4"] },
   { key: "7sus4", fullName: "dominant seventh suspended fourth", displayName: "7sus4", pcs: [0,5,7,10], binary: "100001010010", decimal: 2130, intervals: ["R","4","5","♭7"], aliases: ["7sus4"] },
   { key: "9sus4", fullName: "dominant ninth suspended fourth", displayName: "9sus4", pcs: [0,5,7,10,2], binary: "101001010010", decimal: 2642, intervals: ["R","4","5","♭7","9"], aliases: ["9sus4"] },
@@ -222,10 +268,12 @@ const CHORD_QUALITIES: ChordQuality[] = [
   { key: "7#9", fullName: "dominant seventh sharp ninth", displayName: "7#9", pcs: [0,4,7,10,3], binary: "100110010010", decimal: 2450, intervals: ["R","3","5","♭7","♯9"], aliases: ["7#9"] },
   { key: "7#11", fullName: "lydian dominant seventh", displayName: "7#11", pcs: [0,4,7,10,6], binary: "100010110010", decimal: 2226, intervals: ["R","3","5","♭7","♯11"], aliases: ["7#11"] },
   { key: "7b13", fullName: "dominant seventh flat thirteen", displayName: "7b13", pcs: [0,4,7,10,8], binary: "100010011010", decimal: 2202, intervals: ["R","3","5","♭7","♭13"], aliases: ["7b13"] },
+  { key: "9b13", fullName: "dominant ninth flat thirteenth", displayName: "9b13", pcs: [0,4,7,10,2,8], binary: "101010011010", decimal: 2714, intervals: ["R","3","5","♭7","9","♭13"], aliases: ["9b13","dom9b13"] },
   { key: "6add9", fullName: "sixth added ninth", displayName: "69", pcs: [0,4,7,9,2], binary: "101010010100", decimal: 2708, intervals: ["R","3","5","6","9"], aliases: ["6add9","69"] },
   { key: "M6#11", fullName: "sixth sharp eleventh", displayName: "M6#11", pcs: [0,4,7,9,6], binary: "100010110100", decimal: 2228, intervals: ["R","3","5","6","♯11"], aliases: ["M6#11"] },
   { key: "69#11", fullName: "major sixth ninth sharp eleventh", displayName: "69#11", pcs: [0,4,7,9,2,6], binary: "101010110100", decimal: 2740, intervals: ["R","3","5","6","9","♯11"], aliases: ["69#11"] },
   { key: "maj7add13", fullName: "major seventh added thirteenth", displayName: "∆add13", pcs: [0,4,7,11,9], binary: "100010010101", decimal: 2197, intervals: ["R","3","5","7","13"], aliases: ["maj7add13","M7add13","∆add13","∆13no9"] },
+  { key: "maj7b13", fullName: "major seventh flat thirteenth", displayName: "∆b13", pcs: [0,4,7,8,11], binary: "100010011001", decimal: 2201, intervals: ["R","3","5","♭13","7"], aliases: ["maj7b13","M7b13","∆b13"] },
   { key: "maj#4", fullName: "major seventh sharp eleventh", displayName: "∆#4", pcs: [0,4,7,11,6], binary: "100010110001", decimal: 2225, intervals: ["R","3","5","7","♯11"], aliases: ["maj#4","∆#11"] },
   { key: "maj9#11", fullName: "major sharp eleventh (lydian)", displayName: "∆9#11", pcs: [0,4,7,11,2,6], binary: "101010110001", decimal: 2737, intervals: ["R","3","5","7","9","♯11"], aliases: ["maj9#11","∆9#11"] },
   { key: "maj7#9#11", fullName: "major sharp ninth sharp eleventh", displayName: "∆#9#11", pcs: [0,4,7,11,3,6], binary: "100110110001", decimal: 2481, intervals: ["R","3","5","7","♯9","♯11"], aliases: ["maj7#9#11"] },
@@ -319,6 +367,22 @@ export function lookupByDecimal(decimal: number): ChordQuality | undefined {
  */
 export function getAllQualities(): readonly ChordQuality[] {
   return CHORD_QUALITIES;
+}
+
+/** Lazy key→quality index */
+let KEY_INDEX: Map<string, ChordQuality> | null = null;
+function getKeyIndex(): Map<string, ChordQuality> {
+  if (!KEY_INDEX) {
+    KEY_INDEX = new Map(CHORD_QUALITIES.map(q => [q.key, q]));
+  }
+  return KEY_INDEX;
+}
+
+/**
+ * Look up a chord quality by its dictionary key (e.g. "maj7", "min", "7b9").
+ */
+export function findQualityByKey(key: string): ChordQuality | undefined {
+  return getKeyIndex().get(key);
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { Gesture, Harmonic, Clip, Segmentation, BarChordInfo, Leadsheet } from '../types/clip';
+import type { Gesture, Harmonic, Clip, Segmentation, BarChordInfo, Leadsheet, LoopMeta } from '../types/clip';
 import { createZip } from './zip';
 
 export function encodeVariableLength(value: number): number[] {
@@ -82,6 +82,7 @@ function buildMetadataEvents(
   title?: string,
   variantOf?: string,
   clipNotes?: string,
+  loopMeta?: LoopMeta,
 ): Array<{ tick: number; data: number[] }> {
   const metaEvents: Array<{ tick: number; data: number[] }> = [];
 
@@ -103,6 +104,12 @@ function buildMetadataEvents(
   if (clipNotes) fileData.notes = clipNotes;
   const fileJson = JSON.stringify(fileData);
   metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${fileJson}`) });
+
+  // Loop metadata event at tick 0 (if sourced from Apple Loops DB)
+  if (loopMeta) {
+    const lmData = { type: 'loopmeta', ...loopMeta };
+    metaEvents.push({ tick: 0, data: encodeTextMeta(0x01, `MCURATOR:v1 ${JSON.stringify(lmData)}`) });
+  }
 
   // Leadsheet text event at tick 0 (if present)
   if (leadsheet && leadsheet.inputText) {
@@ -174,6 +181,7 @@ export function createMIDITrack(
   title?: string,
   variantOf?: string,
   clipNotes?: string,
+  loopMeta?: LoopMeta,
 ): number[] {
   // All events as absolute-tick entries, converted to delta at the end
   const allEvents: Array<{ tick: number; data: number[] }> = [];
@@ -191,7 +199,7 @@ export function createMIDITrack(
   });
 
   // MCURATOR metadata events
-  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat, leadsheet, title, variantOf, clipNotes);
+  const metaEvents = buildMetadataEvents(segmentation, barChords, _ticksPerBeat, leadsheet, title, variantOf, clipNotes, loopMeta);
   allEvents.push(...metaEvents);
 
   // Note events
@@ -252,10 +260,11 @@ export function createMIDI(
   title?: string,
   variantOf?: string,
   clipNotes?: string,
+  loopMeta?: LoopMeta,
 ): Uint8Array {
   const ticksPerBeat = gesture.ticks_per_beat || 480;
   const header = createMIDIHeader(1, ticksPerBeat);
-  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords, leadsheet, title, variantOf, clipNotes);
+  const track = createMIDITrack(gesture, harmonic, bpm, ticksPerBeat, segmentation, harmonic.barChords, leadsheet, title, variantOf, clipNotes, loopMeta);
 
   return new Uint8Array([...header, ...track]);
 }
@@ -266,7 +275,7 @@ export function downloadMIDI(clip: Clip): void {
   const title = clip.filename.replace(/\.mid$/i, '');
   const midiData = createMIDI(
     clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet,
-    title, clip.sourceFilename, clip.notes || undefined,
+    title, clip.sourceFilename, clip.notes || undefined, clip.loopMeta,
   );
   const blob = new Blob([midiData], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);

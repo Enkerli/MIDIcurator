@@ -863,6 +863,11 @@ body {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext x='0' y='18' font-size='16'%3E%E2%9C%82%EF%B8%8F%3C/text%3E%3C/svg%3E") 12 12, crosshair;
 }
 
+/* When hovering over an existing boundary in scissors mode: pointer signals "click to remove" */
+.mc-piano-roll-canvas--scissors-remove {
+  cursor: pointer !important;
+}
+
 /* Piano roll toolbar (transport + tool buttons) */
 .mc-piano-roll-toolbar {
   display: flex;
@@ -1164,6 +1169,56 @@ body {
   border-bottom: 2px dotted var(--mc-accent);
 }
 
+/* Texture label — shown in segment-mode chord bar cells */
+.mc-chord-bar-texture {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--mc-text-dim);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 1;
+}
+
+/* Degree label — replaces chord symbol when leadsheet context is available.
+   Uses the same size as the chord symbol but a softer colour to signal
+   it's interval content, not a chord name. */
+.mc-chord-bar-degrees {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mc-text-label);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 1.2;
+}
+
+/* Texture glyph (■ ↑ ↓ etc.) shown alongside chord symbol when no leadsheet. */
+.mc-chord-bar-texture-glyph {
+  font-size: 9px;
+  opacity: 0.55;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+
+/* Segment-mode cells are flex-column so symbol sits above texture label */
+.mc-chord-bar-cell--segment-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+
+.mc-chord-bar-cell--segment-mode .mc-chord-bar-symbol {
+  font-size: 11px;
+  line-height: 1;
+}
+
 /* ─── Leadsheet bar (underlying chords) ─────────────────────────── */
 
 .mc-leadsheet-bar {
@@ -1197,10 +1252,11 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: center;
+  text-align: left;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-left: 3px;
   /* When position: absolute is set inline, this becomes a positioned flex container */
 }
 
@@ -1209,11 +1265,37 @@ body {
   color: var(--mc-text-dim);
   font-weight: 400;
   font-style: italic;
+  justify-content: center;
+  padding-left: 0;
 }
 
 .mc-leadsheet-cell--nc,
 .mc-leadsheet-cell--repeat {
   opacity: 0.6;
+}
+
+/* Carried chord: chord extends from previous bar, barline shown but label suppressed */
+.mc-leadsheet-cell--carried {
+  opacity: 0.35;
+}
+
+/* When the source chord started in a tiny sliver of the previous bar,
+   show the symbol here (first carried bar) instead of a dash. */
+.mc-leadsheet-cell--carried-label {
+  opacity: 0.6;
+}
+
+.mc-leadsheet-chord--carried {
+  color: var(--mc-text-dim);
+  font-weight: 400;
+  justify-content: center;
+  padding-left: 0;
+}
+
+/* Chord label shown in first carried bar when source was near bar-end */
+.mc-leadsheet-chord--carried-label {
+  color: var(--mc-text-muted);
+  font-style: italic;
 }
 
 .mc-leadsheet-chord--invalid {
@@ -1340,4 +1422,202 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   border-radius: 6px;
+}
+
+/* ─── Loop DB loader (Sidebar) ──────────────────────────────────── */
+
+.mc-loop-db-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.mc-btn--loop-db {
+  padding: 5px 10px;
+  background: var(--mc-bg-card);
+  border: 1px dashed var(--mc-border);
+  border-radius: 6px;
+  color: var(--mc-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mc-btn--loop-db:hover {
+  border-color: var(--mc-accent);
+  color: var(--mc-accent);
+}
+
+/* Turns solid once a DB is loaded */
+.mc-btn--loop-db.is-loaded {
+  border-style: solid;
+  border-color: var(--mc-accent);
+  color: var(--mc-accent-light);
+}
+
+.mc-btn--loop-db.is-error {
+  border-style: solid;
+  border-color: #8a3a3a;
+  color: #d47a7a;
+}
+
+.mc-btn--loop-db.is-loading {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.mc-loop-db-name {
+  font-size: 11px;
+  color: var(--mc-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.mc-loop-db-name--hint {
+  color: var(--mc-text-dim);
+  font-style: italic;
+}
+
+.mc-loop-db-enriched {
+  color: var(--mc-green-text);
+  font-weight: 600;
+}
+
+/* ─── Loop metadata chips (StatsGrid) ───────────────────────────── */
+
+.mc-loop-meta {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--mc-bg-card);
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* One labeled row per metadata category */
+.mc-loop-meta-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.mc-loop-meta-label {
+  flex-shrink: 0;
+  width: 68px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mc-text-dim);
+  padding-top: 3px;
+  text-align: right;
+}
+
+.mc-loop-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+.mc-loop-meta-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* When chip is a button (clickable to filter) */
+button.mc-loop-meta-chip--clickable {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  line-height: inherit;
+  transition: filter 0.1s, opacity 0.1s;
+}
+button.mc-loop-meta-chip--clickable:hover {
+  filter: brightness(1.25);
+}
+button.mc-loop-meta-chip--clickable:active {
+  opacity: 0.75;
+}
+
+.mc-loop-meta-chip--instrument {
+  background: #2a3a4a;
+  color: #8ab4d4;
+}
+:root[data-theme="light"] .mc-loop-meta-chip--instrument {
+  background: #ddeef8;
+  color: #1a5080;
+}
+
+.mc-loop-meta-chip--genre {
+  background: #3a2a4a;
+  color: #b48ad4;
+}
+:root[data-theme="light"] .mc-loop-meta-chip--genre {
+  background: #eeddff;
+  color: #601a80;
+}
+
+.mc-loop-meta-chip--key {
+  background: #2a4a2a;
+  color: #8ad48a;
+}
+:root[data-theme="light"] .mc-loop-meta-chip--key {
+  background: #ddf8dd;
+  color: #1a601a;
+}
+
+.mc-loop-meta-chip--looptype {
+  background: #3a3a2a;
+  color: #c4b86a;
+}
+:root[data-theme="light"] .mc-loop-meta-chip--looptype {
+  background: #f8f4dd;
+  color: #605a1a;
+}
+
+.mc-loop-meta-chip--descriptor {
+  background: var(--mc-bg-raised);
+  border: 1px solid var(--mc-border);
+  color: var(--mc-text-muted);
+  font-weight: 400;
+}
+
+.mc-loop-meta-chip--provenance {
+  background: #3a2a2a;
+  color: #c4946a;
+}
+:root[data-theme="light"] .mc-loop-meta-chip--provenance {
+  background: #faeedd;
+  color: #804010;
+}
+
+.mc-loop-meta-chip--author {
+  background: transparent;
+  color: var(--mc-text-dim);
+  border: 1px solid var(--mc-border);
+  font-weight: 400;
+}
+
+/* Plain text within a metadata section (comment, copyright, folder) */
+.mc-loop-meta-folder,
+.mc-loop-meta-text {
+  font-size: 11px;
+  color: var(--mc-text-muted);
+  padding-top: 2px;
+}
+.mc-loop-meta-text--dim {
+  color: var(--mc-text-dim);
+  font-style: italic;
 }

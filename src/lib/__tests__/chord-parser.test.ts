@@ -79,6 +79,27 @@ describe('parseChordSymbol — slash chords', () => {
   });
 });
 
+describe('parseChordSymbol — quality keys match dictionary', () => {
+  it('parses "Dm7b5" → qualityKey m7b5 (half-diminished)', () => {
+    const result = parseChordSymbol('Dm7b5');
+    expect(result).not.toBeNull();
+    expect(result!.root).toBe(2);
+    expect(result!.qualityKey).toBe('m7b5');
+  });
+
+  it('parses "Dø" → qualityKey m7b5', () => {
+    const result = parseChordSymbol('Dø');
+    expect(result).not.toBeNull();
+    expect(result!.qualityKey).toBe('m7b5');
+  });
+
+  it('parses "Cm6" → qualityKey m6', () => {
+    const result = parseChordSymbol('Cm6');
+    expect(result).not.toBeNull();
+    expect(result!.qualityKey).toBe('m6');
+  });
+});
+
 describe('isValidChordSymbol — slash chords', () => {
   it('"Dm/F" is valid', () => {
     expect(isValidChordSymbol('Dm/F')).toBe(true);

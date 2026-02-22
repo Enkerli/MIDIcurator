@@ -53,6 +53,8 @@ interface ClipDetailProps {
   onAddBoundary: (tick: number) => void;
   onRemoveBoundary: (tick: number) => void;
   onMoveBoundary: (fromTick: number, toTick: number) => void;
+  /** When present, auto-segment from leadsheet boundaries is available. */
+  onSegmentFromLeadsheet?: () => void;
   onFilterByTag?: (tag: string) => void;
   onLeadsheetChange?: (inputText: string) => void;
   onLeadsheetBoundaryMove?: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
@@ -95,6 +97,7 @@ export function ClipDetail({
   onFilterByTag,
   onLeadsheetChange,
   onLeadsheetBoundaryMove,
+  onSegmentFromLeadsheet,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -198,10 +201,19 @@ export function ClipDetail({
           <button
             className={`mc-btn--tool ${scissorsMode ? 'mc-btn--tool-active' : ''}`}
             onClick={onToggleScissors}
-            title={scissorsMode ? 'Exit scissors mode (S or Esc)' : 'Scissors tool — click to place segment boundaries (S)'}
+            title={scissorsMode ? 'Exit scissors mode (S or Esc)' : 'Scissors tool — click to add a boundary, click a boundary to remove it, drag to move (S)'}
           >
             ✂
           </button>
+          {onSegmentFromLeadsheet && (
+            <button
+              className="mc-btn--tool"
+              onClick={onSegmentFromLeadsheet}
+              title="Auto-segment from leadsheet chord boundaries"
+            >
+              ♩÷
+            </button>
+          )}
           <div className="mc-zoom-controls">
             <button
               className="mc-btn--tool"
@@ -261,6 +273,9 @@ export function ClipDetail({
             onSegmentClick={(startTick, endTick) => onRangeSelect({ startTick, endTick })}
             onChordEdit={handleChordBarEdit}
             segmentChords={clip.segmentation?.segmentChords}
+            gesture={clip.gesture}
+            harmonic={clip.harmonic}
+            leadsheet={clip.leadsheet}
           />
         )}
         <PianoRoll
@@ -293,6 +308,7 @@ export function ClipDetail({
         rangeChordInfo={rangeChordInfo}
         onOverrideChord={onOverrideChord}
         onAdaptChord={onAdaptChord}
+        onFilterByTag={onFilterByTag}
       />
 
       <div className="mc-debug-info">

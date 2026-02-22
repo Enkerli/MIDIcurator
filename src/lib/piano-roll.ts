@@ -1,4 +1,5 @@
-import type { Gesture, Harmonic } from '../types/clip';
+import type { Gesture, Harmonic, Leadsheet } from '../types/clip';
+import { findQualityByKey } from './chord-dictionary';
 
 /**
  * Layout constants and coordinate math for piano roll rendering.
@@ -24,6 +25,31 @@ export interface PianoRollLayout {
   topPad: number;
 }
 
+/**
+ * The harmonic role of a note (or a sub-segment of a note) relative to
+ * the active leadsheet chord at that moment in time.
+ *
+ *  'root'       — pitch class matches the chord root
+ *  'chord-tone' — pitch class is in the chord template (non-root)
+ *  'nct'        — pitch class is not in the chord template (non-chord tone)
+ *  'none'       — no leadsheet context; rendered as plain velocity colour
+ */
+export type NoteRole = 'root' | 'chord-tone' | 'nct' | 'none';
+
+/**
+ * A sub-segment of a note rect that falls within a single chord window.
+ * A note spanning a chord boundary will have two segments with potentially
+ * different roles (e.g. chord-tone in the first chord, NCT in the second).
+ */
+export interface NoteRectSegment {
+  /** X pixel offset from the note rect's own x (0 = note start) */
+  xOffset: number;
+  /** Width of this sub-segment in pixels */
+  w: number;
+  /** Harmonic role within this chord window */
+  role: NoteRole;
+}
+
 export interface NoteRect {
   x: number;
   y: number;
@@ -31,6 +57,13 @@ export interface NoteRect {
   h: number;
   velocity: number;
   pitch: number;
+  /**
+   * Per-chord-window segments. Present only when a leadsheet is supplied to
+   * computeNoteRects. A single-element array means the note falls entirely
+   * within one chord window. Multiple elements mean the note crosses one or
+   * more chord boundaries — each segment has its own role.
+   */
+  segments?: NoteRectSegment[];
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
@@ -98,13 +131,197 @@ export function computeLayout(
   };
 }
 
+// ─── Leadsheet chord window helpers ────────────────────────────────────────
+
+/**
+ * A flat, sorted list of absolute-tick chord windows derived from a leadsheet.
+ * Covers the full clip duration with no gaps.
+ */
+export interface ChordWindow {
+  startTick: number;
+  endTick: number;
+  /** null = NC bar */
+  templatePcs: number[] | null;
+  /** root PC, or null for NC */
+  rootPc: number | null;
+  /** Chord quality key (e.g. "maj7", "min") for degree-name lookup, or null for NC */
+  qualityKey: string | null;
+}
+
+/**
+ * Build a flat, contiguous array of chord windows from a leadsheet.
+ * Each LeadsheetChord's beatPosition/duration → absolute tick range.
+ * Gaps (NC bars with no prior chord) remain as null-template windows.
+ */
+export function buildChordWindows(
+  leadsheet: Leadsheet,
+  ticksPerBar: number,
+  ticksPerBeat: number,
+  totalTicks: number,
+): ChordWindow[] {
+  // Collect all (startTick, endTick, chord) entries from every bar/chord
+  const raw: Array<{ startTick: number; endTick: number; templatePcs: number[] | null; rootPc: number | null; qualityKey: string | null }> = [];
+
+  for (const bar of leadsheet.bars) {
+    const barStartTick = bar.bar * ticksPerBar;
+    const beatsPerBar = ticksPerBar / ticksPerBeat;
+
+    if (bar.chords.length === 0) continue;
+
+    for (let ci = 0; ci < bar.chords.length; ci++) {
+      const lc = bar.chords[ci]!;
+      const bp = lc.beatPosition ?? (ci / lc.totalInBar) * beatsPerBar;
+      const dur = lc.duration ?? (beatsPerBar / lc.totalInBar);
+      const startTick = barStartTick + bp * ticksPerBeat;
+      const endTick = barStartTick + (bp + dur) * ticksPerBeat;
+      const rootPc = lc.chord?.root ?? null;
+      const qualityKey = lc.chord?.qualityKey ?? null;
+      // templatePcs may be absent on chords produced by parseLeadsheet (text path).
+      // Reconstruct from the dictionary so texture analysis always has a template.
+      let tpcs = lc.chord?.templatePcs ?? null;
+      if (!tpcs && rootPc !== null && qualityKey) {
+        const quality = findQualityByKey(qualityKey);
+        if (quality) tpcs = quality.pcs.map(pc => (pc + rootPc) % 12).sort((a, b) => a - b);
+      }
+      raw.push({ startTick, endTick, templatePcs: tpcs, rootPc, qualityKey });
+    }
+  }
+
+  if (raw.length === 0) return [];
+
+  // Sort by start tick
+  raw.sort((a, b) => a.startTick - b.startTick);
+
+  // Build contiguous windows: fill any leading gap with null, then each entry
+  const windows: ChordWindow[] = [];
+  let cursor = 0;
+
+  for (const entry of raw) {
+    if (entry.startTick > cursor) {
+      // Gap before this chord — null window
+      windows.push({ startTick: cursor, endTick: entry.startTick, templatePcs: null, rootPc: null, qualityKey: null });
+    }
+    windows.push({ startTick: entry.startTick, endTick: entry.endTick, templatePcs: entry.templatePcs, rootPc: entry.rootPc, qualityKey: entry.qualityKey });
+    cursor = entry.endTick;
+  }
+
+  // Trailing gap
+  if (cursor < totalTicks) {
+    windows.push({ startTick: cursor, endTick: totalTicks, templatePcs: null, rootPc: null, qualityKey: null });
+  }
+
+  return windows;
+}
+
+/**
+ * Derive segment boundaries from a leadsheet by converting each chord
+ * change point to an absolute tick position, then snapping each boundary
+ * to the nearest note onset or note-end within `snapTolerance` ticks.
+ *
+ * This gives a "headstart" segmentation that corresponds to the leadsheet
+ * chords but honours the actual note content (pickups, suspensions).
+ *
+ * @param leadsheet       The leadsheet to derive boundaries from.
+ * @param ticksPerBar     Ticks per bar.
+ * @param ticksPerBeat    Ticks per beat.
+ * @param totalTicks      Total clip length in ticks (for clamping).
+ * @param onsets          All note onset ticks (from gesture).
+ * @param durations       All note duration ticks (from gesture).
+ * @param snapTolerance   Max ticks to snap to a note event (default: half a beat).
+ * @returns Sorted, deduplicated array of boundary tick positions.
+ */
+export function segmentFromLeadsheet(
+  leadsheet: Leadsheet,
+  ticksPerBar: number,
+  ticksPerBeat: number,
+  totalTicks: number,
+  onsets: number[],
+  durations: number[],
+  snapTolerance?: number,
+): number[] {
+  const tol = snapTolerance ?? ticksPerBeat / 2;
+
+  // Collect chord-change points: only where the chord actually changes.
+  // Boundaries at bar lines where the chord is identical to the previous
+  // window (repeat bars, sustained chords) are skipped — they produce
+  // segments with identical content that add no analytical value.
+  const windows = buildChordWindows(leadsheet, ticksPerBar, ticksPerBeat, totalTicks);
+  const rawBoundaries: number[] = [];
+  for (let i = 1; i < windows.length; i++) {
+    const prev = windows[i - 1]!;
+    const curr = windows[i]!;
+    if (curr.startTick <= 0 || curr.startTick >= totalTicks) continue;
+    // Emit a boundary only when the harmony actually changes.
+    const chordChanged = curr.rootPc !== prev.rootPc || curr.qualityKey !== prev.qualityKey;
+    if (chordChanged) rawBoundaries.push(curr.startTick);
+  }
+
+  if (rawBoundaries.length === 0) return [];
+
+  // Build the set of candidate snap targets: note onsets and note ends.
+  const snapTargets: number[] = [];
+  for (let i = 0; i < onsets.length; i++) {
+    const onset = onsets[i]!;
+    const end   = onset + durations[i]!;
+    if (onset > 0 && onset < totalTicks) snapTargets.push(onset);
+    if (end   > 0 && end   < totalTicks) snapTargets.push(end);
+  }
+  snapTargets.sort((a, b) => a - b);
+
+  // Snap each raw boundary to the nearest note event within tolerance.
+  const snapped = rawBoundaries.map(raw => {
+    let best = raw;
+    let bestDist = tol + 1; // start beyond tolerance so we only snap if within range
+    for (const t of snapTargets) {
+      const d = Math.abs(t - raw);
+      if (d < bestDist) { bestDist = d; best = t; }
+      if (t > raw + tol) break; // sorted — no need to go further
+    }
+    return best;
+  });
+
+  // Remove anticipation boundaries: if a snapped boundary is within one beat
+  // of the next bar line, it's a pickup/anticipation note that arrived before
+  // the downbeat.  Keeping it creates a tiny trailing segment that (a) looks
+  // wrong in the chord bar and (b) can't be labelled with degrees because its
+  // midpoint still falls in the *previous* chord's window.  Round such
+  // boundaries forward to the bar line itself so the segment starts cleanly.
+  const roundedToBarLine = snapped.map(b => {
+    const nextBarLine = Math.ceil(b / ticksPerBar) * ticksPerBar;
+    if (nextBarLine <= b) return b; // already on a bar line
+    const distToBar = nextBarLine - b;
+    if (distToBar < ticksPerBeat) return nextBarLine; // anticipation — move to bar line
+    return b;
+  });
+
+  // Deduplicate and sort; remove any that landed on 0 or totalTicks after rounding
+  return [...new Set(roundedToBarLine)]
+    .filter(b => b > 0 && b < totalTicks)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Classify a note's pitch class against a chord window's template.
+ */
+function classifyPc(pc: number, window: ChordWindow): NoteRole {
+  if (window.templatePcs === null) return 'none';
+  if (window.rootPc === pc) return 'root';
+  if (window.templatePcs.includes(pc)) return 'chord-tone';
+  return 'nct';
+}
+
+// ─── Note rectangles ────────────────────────────────────────────────────────
+
 /**
  * Convert gesture+harmonic note data into pixel-space rectangles.
+ * When `chordWindows` is supplied, each rect gains a `segments` array
+ * describing the harmonic role of each portion of the note.
  */
 export function computeNoteRects(
   gesture: Gesture,
   harmonic: Harmonic,
   layout: PianoRollLayout,
+  chordWindows?: ChordWindow[],
 ): NoteRect[] {
   const rects: NoteRect[] = [];
 
@@ -113,6 +330,7 @@ export function computeNoteRects(
     const duration = gesture.durations[i]!;
     const velocity = gesture.velocities[i]!;
     const pitch = harmonic.pitches[i]!;
+    const pc = pitch % 12;
 
     const x = layout.labelWidth + onset * layout.pxPerTick;
     // Piano roll: higher pitch = higher on screen (y=0 is top)
@@ -120,7 +338,27 @@ export function computeNoteRects(
     const w = Math.max(1, duration * layout.pxPerTick);
     const h = Math.max(1, layout.pxPerSemitone - 1); // 1px gap between rows
 
-    rects.push({ x, y, w, h, velocity, pitch });
+    let segments: NoteRectSegment[] | undefined;
+
+    if (chordWindows && chordWindows.length > 0) {
+      const noteEnd = onset + duration;
+      // Find all chord windows that overlap [onset, noteEnd)
+      const overlapping = chordWindows.filter(
+        cw => cw.startTick < noteEnd && cw.endTick > onset,
+      );
+
+      if (overlapping.length > 0) {
+        segments = overlapping.map(cw => {
+          const segStart = Math.max(onset, cw.startTick);
+          const segEnd = Math.min(noteEnd, cw.endTick);
+          const xOffset = (segStart - onset) * layout.pxPerTick;
+          const segW = Math.max(1, (segEnd - segStart) * layout.pxPerTick);
+          return { xOffset, w: segW, role: classifyPc(pc, cw) };
+        });
+      }
+    }
+
+    rects.push({ x, y, w, h, velocity, pitch, segments });
   }
 
   return rects;

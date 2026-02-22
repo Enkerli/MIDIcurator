@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import type { Clip, DetectedChord } from '../types/clip';
-import { rootName, spellInChordContext } from '../lib/chord-dictionary';
+import { rootName, spellInChordContext, buildChordToneSpellingMap, findQualityByKey } from '../lib/chord-dictionary';
+import { keyTypeLabel, rootPcName, gbLoopTypeLabel } from '../lib/loop-database';
 import { parseChordSymbol } from '../lib/chord-parser';
 
 interface StatsGridProps {
@@ -24,6 +25,8 @@ interface StatsGridProps {
   onOverrideChord?: () => void;
   /** Called to adapt notes to a new chord (chord substitution) */
   onAdaptChord?: (newChord: DetectedChord) => void;
+  /** Called when a metadata chip is clicked to set it as a search filter */
+  onFilterByTag?: (tag: string) => void;
 }
 
 /**
@@ -101,6 +104,7 @@ export function StatsGrid({
   rangeChordInfo,
   onOverrideChord,
   onAdaptChord,
+  onFilterByTag,
 }: StatsGridProps) {
   // Chord input state for substitution
   const [chordInput, setChordInput] = useState('');
@@ -149,14 +153,25 @@ export function StatsGrid({
     ? `[${[...new Set(effectiveChordInfo.pitchClasses)].sort((a, b) => a - b).join(',')}]`
     : '';
 
-  // Format note names for display, spelled consistently with the chord root's accidental
+  // Format note names for display, spelled using interval direction from the quality
+  // (e.g. A♭ not G♯ for the ♭5 of Dm7♭5), falling back to root-context spelling for NCTs.
   const chordRoot = effectiveChordInfo.chord;
+  const chordToneSpelling = useMemo(() => {
+    if (!chordRoot) return null;
+    const quality = findQualityByKey(chordRoot.qualityKey ?? '');
+    if (!quality) return null;
+    return buildChordToneSpellingMap(chordRoot.root, quality);
+  }, [chordRoot]);
   const noteNamesStr = effectiveChordInfo.pitchClasses.length > 0
     ? [...new Set(effectiveChordInfo.pitchClasses)]
         .sort((a, b) => a - b)
-        .map(pc => chordRoot
-          ? spellInChordContext(pc, chordRoot.root, chordRoot.rootName)
-          : rootName(pc))
+        .map(pc => {
+          const normalPc = ((pc % 12) + 12) % 12;
+          if (chordToneSpelling?.has(normalPc)) return chordToneSpelling.get(normalPc)!;
+          return chordRoot
+            ? spellInChordContext(normalPc, chordRoot.root, chordRoot.rootName)
+            : rootName(normalPc);
+        })
         .join(' ')
     : '';
 
@@ -281,6 +296,192 @@ export function StatsGrid({
         <div className="mc-stat-label">Syncopation</div>
         <div className="mc-stat-value">{clip.gesture.syncopation_score.toFixed(2)}</div>
       </div>
+
+      {clip.loopMeta && (
+        <div className="mc-loop-meta">
+          {/* Instrument row */}
+          {clip.loopMeta.instrumentType && (() => {
+            const sub = clip.loopMeta!.instrumentSubType;
+            const main = clip.loopMeta!.instrumentType;
+            return (
+              <div className="mc-loop-meta-section">
+                <span className="mc-loop-meta-label">Instrument</span>
+                <div className="mc-loop-meta-chips">
+                  {sub && sub !== main && onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--instrument mc-loop-meta-chip--clickable"
+                            title={`Filter by instrument type "${main}"`}
+                            onClick={() => onFilterByTag(`instrument:${main}`)}>
+                      {main}
+                    </button>
+                  ) : sub && sub !== main ? (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--instrument">{main}</span>
+                  ) : null}
+                  {onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--instrument mc-loop-meta-chip--clickable"
+                            title={`Filter by instrument "${sub || main}"`}
+                            onClick={() => onFilterByTag(`instrument:${sub || main}`)}>
+                      {sub || main}
+                    </button>
+                  ) : (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--instrument">{sub || main}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Genre row */}
+          {clip.loopMeta.genre && (
+            <div className="mc-loop-meta-section">
+              <span className="mc-loop-meta-label">Genre</span>
+              <div className="mc-loop-meta-chips">
+                {onFilterByTag ? (
+                  <button className="mc-loop-meta-chip mc-loop-meta-chip--genre mc-loop-meta-chip--clickable"
+                          title={`Filter by genre "${clip.loopMeta.genre}"`}
+                          onClick={() => onFilterByTag(`genre:${clip.loopMeta!.genre}`)}>
+                    {clip.loopMeta.genre}
+                  </button>
+                ) : (
+                  <span className="mc-loop-meta-chip mc-loop-meta-chip--genre">{clip.loopMeta.genre}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Key row */}
+          {clip.loopMeta.rootPc >= 0 && (() => {
+            const keyLabel = `${rootPcName(clip.loopMeta!.rootPc)} ${keyTypeLabel(clip.loopMeta!.keyType)}`;
+            return (
+              <div className="mc-loop-meta-section">
+                <span className="mc-loop-meta-label">Key</span>
+                <div className="mc-loop-meta-chips">
+                  {onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--key mc-loop-meta-chip--clickable"
+                            title={`Filter by key "${keyLabel}"`}
+                            onClick={() => onFilterByTag(`key:${keyLabel}`)}>
+                      {keyLabel}
+                    </button>
+                  ) : (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--key">{keyLabel}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Loop type row */}
+          {clip.loopMeta.gbLoopType > 0 && (() => {
+            const loopLabel = gbLoopTypeLabel(clip.loopMeta!.gbLoopType);
+            return (
+              <div className="mc-loop-meta-section">
+                <span className="mc-loop-meta-label">Loop type</span>
+                <div className="mc-loop-meta-chips">
+                  {onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--looptype mc-loop-meta-chip--clickable"
+                            title={`Filter by loop type "${loopLabel}"`}
+                            onClick={() => onFilterByTag(`looptype:${clip.loopMeta!.gbLoopType}`)}>
+                      {loopLabel}
+                    </button>
+                  ) : (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--looptype">{loopLabel}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Descriptors row */}
+          {clip.loopMeta.descriptors && (() => {
+            const tags = clip.loopMeta!.descriptors.split(',').map(d => d.trim()).filter(Boolean);
+            return tags.length > 0 ? (
+              <div className="mc-loop-meta-section">
+                <span className="mc-loop-meta-label">Mood</span>
+                <div className="mc-loop-meta-chips">
+                  {tags.map(d => (
+                    onFilterByTag ? (
+                      <button key={d} className="mc-loop-meta-chip mc-loop-meta-chip--descriptor mc-loop-meta-chip--clickable"
+                              title={`Filter by descriptor "${d}"`}
+                              onClick={() => onFilterByTag(`descriptor:${d}`)}>
+                        {d}
+                      </button>
+                    ) : (
+                      <span key={d} className="mc-loop-meta-chip mc-loop-meta-chip--descriptor">{d}</span>
+                    )
+                  ))}
+                </div>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Provenance row: collection, jamPack, author */}
+          {(clip.loopMeta.collection || clip.loopMeta.jamPack || clip.loopMeta.author) && (
+            <div className="mc-loop-meta-section">
+              <span className="mc-loop-meta-label">Pack</span>
+              <div className="mc-loop-meta-chips">
+                {clip.loopMeta.jamPack && (
+                  onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--provenance mc-loop-meta-chip--clickable"
+                            title={`Filter by JamPack "${clip.loopMeta.jamPack}"`}
+                            onClick={() => onFilterByTag(`jampak:${clip.loopMeta!.jamPack}`)}>
+                      {clip.loopMeta.jamPack}
+                    </button>
+                  ) : (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--provenance">{clip.loopMeta.jamPack}</span>
+                  )
+                )}
+                {clip.loopMeta.collection && (
+                  onFilterByTag ? (
+                    <button className="mc-loop-meta-chip mc-loop-meta-chip--provenance mc-loop-meta-chip--clickable"
+                            title={`Filter by collection "${clip.loopMeta.collection}"`}
+                            onClick={() => onFilterByTag(`collection:${clip.loopMeta!.collection}`)}>
+                      {clip.loopMeta.collection}
+                    </button>
+                  ) : (
+                    <span className="mc-loop-meta-chip mc-loop-meta-chip--provenance">{clip.loopMeta.collection}</span>
+                  )
+                )}
+                {clip.loopMeta.author && (
+                  <span className="mc-loop-meta-chip mc-loop-meta-chip--provenance mc-loop-meta-chip--author">
+                    {clip.loopMeta.author}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Folder path */}
+          {clip.loopMeta.folderPath && (
+            <div className="mc-loop-meta-section">
+              <span className="mc-loop-meta-label">Location</span>
+              <div className="mc-loop-meta-chips">
+                <span className="mc-loop-meta-folder" title={clip.loopMeta.folderPath}>
+                  {clip.loopMeta.folderPath}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Comment */}
+          {clip.loopMeta.comment && (
+            <div className="mc-loop-meta-section">
+              <span className="mc-loop-meta-label">Comment</span>
+              <div className="mc-loop-meta-chips">
+                <span className="mc-loop-meta-text">{clip.loopMeta.comment}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Copyright */}
+          {clip.loopMeta.copyright && (
+            <div className="mc-loop-meta-section">
+              <span className="mc-loop-meta-label">Copyright</span>
+              <div className="mc-loop-meta-chips">
+                <span className="mc-loop-meta-text mc-loop-meta-text--dim">{clip.loopMeta.copyright}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

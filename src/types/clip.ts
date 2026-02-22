@@ -136,6 +136,53 @@ export interface Leadsheet {
   bars: LeadsheetBar[];
 }
 
+/**
+ * Metadata sourced from the Apple Loops / Logic Pro loop browser database
+ * (`~/Music/Audio Music Apps/Databases/LogicLoopsDatabaseV11.db`).
+ * Attached to a clip at import time when the DB is available.
+ */
+export interface LoopMeta {
+  /** Original `.caf` filename used as the DB key */
+  cafFilename: string;
+  /** Root pitch class (0 = C … 11 = B), −1 if unknown/any */
+  rootPc: number;
+  /** 0 = Any, 1 = Major, 2 = Minor, 3 = Neither (atonal/FX) */
+  keyType: 0 | 1 | 2 | 3;
+  /** Tempo in BPM as stored in the DB */
+  tempo: number;
+  /** Number of quarter-note beats */
+  numberOfBeats: number;
+  /** Time signature numerator */
+  timeSignatureTop: number;
+  /** Time signature denominator */
+  timeSignatureBottom: number;
+  /** Broad instrument category, e.g. "Keyboards", "Bass", "Guitars" */
+  instrumentType: string;
+  /** Narrower instrument sub-category, e.g. "Synthesizer", "Electric Piano" */
+  instrumentSubType: string;
+  /** Genre tag, e.g. "Hip Hop", "Jazz", "Techno" */
+  genre: string;
+  /** Comma-separated descriptor tags, e.g. "Dark,Grooving,Melodic" */
+  descriptors: string;
+  /** Pack / collection name (may be empty) */
+  collection: string;
+  /** Artist / author credit (may be empty) */
+  author: string;
+  /**
+   * GarageBand loop type: 0 = Classic (audio), 1 = Pattern (step-sequencer),
+   * 2 = Live Loops. Present on user-created .aif loops.
+   */
+  gbLoopType: number;
+  /** JamPack / bundle name (e.g. "Modular Melodies") */
+  jamPack?: string;
+  /** Free-text comment from the DB */
+  comment?: string;
+  /** Copyright string (e.g. "Creator: Logic") */
+  copyright?: string;
+  /** Human-readable folder path derived from fileURL (e.g. "Apple Loops / Modular Melodies") */
+  folderPath?: string;
+}
+
 /** A clip stored in IndexedDB. */
 export interface Clip {
   id: string;
@@ -153,6 +200,8 @@ export interface Clip {
   segmentation?: Segmentation;
   /** Leadsheet (underlying chord) annotation, manually entered. */
   leadsheet?: Leadsheet;
+  /** Metadata from the Logic/GarageBand loop browser DB, if available at import time. */
+  loopMeta?: LoopMeta;
 }
 
 /** A tag record in the 'tags' object store. */

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import type { Clip, DetectedChord, Leadsheet, Segmentation, SegmentChordInfo } from '../types/clip';
+import type { Clip, DetectedChord, Leadsheet, Segmentation, SegmentChordInfo, LoopMeta } from '../types/clip';
 import { useDatabase } from '../hooks/useDatabase';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
@@ -8,18 +8,45 @@ import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEvents
 import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllClips, downloadVariantsAsZip } from '../lib/midi-export';
-import { getNotesInTickRange, detectChordBlocks } from '../lib/piano-roll';
+import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
 import { detectChord, detectChordsForSegments } from '../lib/chord-detect';
 import { spliceSegment, isTrivialSegments, removeRestSegments } from '../lib/chord-segments';
 import { substituteSegmentPitches } from '../lib/chord-substitute';
 import { parseLeadsheet } from '../lib/leadsheet-parser';
+import { loadLoopDb, lookupLoopMeta, getLoadedDbFileName, keyTypeLabel, rootPcName } from '../lib/loop-database';
 import { PROGRESSIONS, transposeProgression } from '../lib/progressions';
 import type { VoicingShape } from '../lib/progressions';
 import { generateProgressionClip } from '../lib/generate-clip';
 import { Sidebar } from './Sidebar';
 import { ClipDetail } from './ClipDetail';
 import { KeyboardShortcutsBar } from './KeyboardShortcutsBar';
+
+/**
+ * Derive a Segmentation from a leadsheet + gesture, snapping chord boundaries
+ * to nearby note events. Returns undefined if the leadsheet yields no internal
+ * boundaries (e.g. a single-chord leadsheet with no chord changes).
+ * Module-level so it can be called before React hooks are initialised (e.g. at import time).
+ */
+function computeSegmentationFromLeadsheet(
+  gesture: Clip['gesture'],
+  harmonic: Clip['harmonic'],
+  leadsheet: Leadsheet,
+): Segmentation | undefined {
+  const { onsets, durations, ticks_per_bar, ticks_per_beat, num_bars } = gesture;
+  const totalTicks = num_bars * ticks_per_bar;
+  const boundaries = segmentFromLeadsheet(leadsheet, ticks_per_bar, ticks_per_beat, totalTicks, onsets, durations);
+  if (boundaries.length === 0) return undefined;
+  const segResults = detectChordsForSegments(harmonic.pitches, onsets, durations, boundaries, totalTicks);
+  const segmentChords: SegmentChordInfo[] = segResults.map(sr => ({
+    index: sr.index,
+    startTick: sr.startTick,
+    endTick: sr.endTick,
+    chord: toDetectedChord(sr.chord),
+    pitchClasses: sr.pitchClasses,
+  }));
+  return { boundaries, segmentChords };
+}
 
 export function MidiCurator() {
   const { db, clips, tagIndex, refreshClips } = useDatabase();
@@ -34,6 +61,9 @@ export function MidiCurator() {
   const [selectionRange, setSelectionRange] = useState<TickRange | null>(null);
   const [scissorsMode, setScissorsMode] = useState(false);
   const [announcement, setAnnouncement] = useState('');
+  const [loopDbFileName, setLoopDbFileName] = useState<string | null>(null);
+  const [loopDbStatus, setLoopDbStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [loopDbEnriched, setLoopDbEnriched] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
@@ -158,6 +188,7 @@ export function MidiCurator() {
     extraTags: string[] = [],
     extraNotes: string = '',
     providedLeadsheet?: Leadsheet | null,
+    loopMeta?: LoopMeta,
   ) => {
     if (!db) return;
 
@@ -225,6 +256,14 @@ export function MidiCurator() {
 
     const clipNotes = [mcurator?.clipNotes, extraNotes].filter(Boolean).join('; ');
 
+    // If we have a leadsheet but no segmentation yet, auto-derive one.
+    if (leadsheet && !segmentation) {
+      segmentation = computeSegmentationFromLeadsheet(gesture, harmonic, leadsheet);
+    }
+
+    // Prefer live DB lookup (passed in), fall back to embedded MIDI metadata.
+    const resolvedLoopMeta = loopMeta ?? mcurator?.loopMeta;
+
     const clip: Clip = {
       id: crypto.randomUUID(),
       filename,
@@ -237,6 +276,7 @@ export function MidiCurator() {
       sourceFilename: mcurator?.variantOf,
       segmentation,
       leadsheet,
+      loopMeta: resolvedLoopMeta,
     };
 
     await db.addClip(clip);
@@ -277,7 +317,11 @@ export function MidiCurator() {
           const midiNotes = extractNotes(midiData);
           const timeSig = extractTimeSignature(midiData);
           const tempGesture = extractGesture(midiNotes, midiData.ticksPerBeat, timeSig);
-          const numBars = tempGesture.num_bars;
+          // Prefer numberOfBeats from basc chunk (exact loop length) over MIDI note content,
+          // which may be shorter than the declared loop if the last bar has sparse notes.
+          const numBars = result.numberOfBeats
+            ? Math.round(result.numberOfBeats / result.beatsPerBar)
+            : tempGesture.num_bars;
 
           // Enrich chord events with roots inferred from MIDI (for b8=15 case)
           let chordEvents = result.chordEvents;
@@ -299,7 +343,8 @@ export function MidiCurator() {
           const leadsheet = appleLoopEventsToLeadsheet(chordEvents, numBars, result.beatsPerBar);
 
 
-          await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes, leadsheet);
+          const loopMeta = lookupLoopMeta(file.name);
+          await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes, leadsheet, loopMeta);
           continue;
         }
 
@@ -587,7 +632,11 @@ export function MidiCurator() {
       return;
     }
     const leadsheet = parseLeadsheet(inputText, selectedClip.gesture.num_bars);
-    const updated: Clip = { ...selectedClip, leadsheet };
+    // Auto-segment from the new leadsheet (replaces any prior leadsheet-derived boundaries).
+    // Manually-placed boundaries that differ from the leadsheet are also replaced — the
+    // assumption is that typing a new leadsheet means you want a fresh segmentation.
+    const segmentation = computeSegmentationFromLeadsheet(selectedClip.gesture, selectedClip.harmonic, leadsheet);
+    const updated: Clip = { ...selectedClip, leadsheet, segmentation };
     await db.updateClip(updated);
     setSelectedClip(updated);
     refreshClips();
@@ -691,6 +740,35 @@ export function MidiCurator() {
     }
   }, [db, loadingSamples, handleFileUpload]);
 
+  const handleLoadLoopDb = useCallback(async (file: File) => {
+    if (!db) return;
+    setLoopDbStatus('loading');
+    try {
+      const buffer = await file.arrayBuffer();
+      await loadLoopDb(buffer, file.name);
+      setLoopDbFileName(getLoadedDbFileName());
+
+      // Back-fill: enrich existing apple-loop clips that have no loopMeta yet.
+      // The lookup uses the clip filename (e.g. "Something.mid") which
+      // lookupLoopMeta converts to "Something.caf" for the DB match.
+      const allClips = await db.getAllClips();
+      let enriched = 0;
+      for (const clip of allClips) {
+        if (clip.loopMeta) continue;           // already has metadata
+        const meta = lookupLoopMeta(clip.filename);
+        if (!meta) continue;
+        await db.updateClip({ ...clip, loopMeta: meta });
+        enriched++;
+      }
+      setLoopDbEnriched(enriched);
+      if (enriched > 0) refreshClips();
+      setLoopDbStatus('ok');
+    } catch (err) {
+      console.error('Failed to load loop database:', err);
+      setLoopDbStatus('error');
+    }
+  }, [db, refreshClips]);
+
   const handleGenerateProgression = useCallback(async (
     progressionIndex: number,
     keyOffset: number,
@@ -729,11 +807,49 @@ export function MidiCurator() {
 
   const filteredClips = useMemo(() => {
     if (!filterTag) return clips;
+    // Field-scoped filter: "field:value" emitted by metadata chip clicks
+    const fieldMatch = filterTag.match(/^(\w+):(.+)$/);
+    if (fieldMatch) {
+      const [, field, val] = fieldMatch;
+      const q = val.toLowerCase();
+      return clips.filter(c => {
+        const m = c.loopMeta;
+        if (!m) return false;
+        switch (field) {
+          case 'instrument':
+            return m.instrumentType.toLowerCase().includes(q) ||
+                   m.instrumentSubType.toLowerCase().includes(q);
+          case 'genre':
+            return m.genre.toLowerCase().includes(q);
+          case 'key':
+            return `${rootPcName(m.rootPc)} ${keyTypeLabel(m.keyType)}`.toLowerCase().includes(q);
+          case 'looptype':
+            return String(m.gbLoopType) === q;
+          case 'descriptor':
+            return m.descriptors.split(',').some(d => d.trim().toLowerCase().includes(q));
+          case 'collection':
+            return (m.collection ?? '').toLowerCase().includes(q);
+          case 'jampak':
+            return (m.jamPack ?? '').toLowerCase().includes(q);
+          default:
+            return false;
+        }
+      });
+    }
+    // Free-text fallback: match filename, user tags, or any loopMeta field
     const q = filterTag.toLowerCase();
     return clips.filter(c => {
       if (c.filename.toLowerCase().includes(q)) return true;
       const clipTags = tagIndex.get(c.id);
-      return clipTags?.some(t => t.toLowerCase().includes(q)) ?? false;
+      if (clipTags?.some(t => t.toLowerCase().includes(q))) return true;
+      const m = c.loopMeta;
+      if (!m) return false;
+      const metaTerms = [
+        m.instrumentType, m.instrumentSubType, m.genre,
+        m.descriptors, m.collection, m.author, m.jamPack ?? '',
+        `${rootPcName(m.rootPc)} ${keyTypeLabel(m.keyType)}`,
+      ];
+      return metaTerms.some(t => t && t.toLowerCase().includes(q));
     });
   }, [clips, filterTag, tagIndex]);
 
@@ -903,6 +1019,22 @@ export function MidiCurator() {
     await updateBoundaries(deduped);
   }, [selectedClip, updateBoundaries]);
 
+  /**
+   * Auto-segment the current clip using its leadsheet chord boundaries.
+   * Each chord change point becomes a segment boundary, snapped to the
+   * nearest note onset or note-end within half a beat.
+   */
+  const handleSegmentFromLeadsheet = useCallback(async () => {
+    if (!selectedClip?.leadsheet || !db) return;
+    const segmentation = computeSegmentationFromLeadsheet(
+      selectedClip.gesture, selectedClip.harmonic, selectedClip.leadsheet,
+    );
+    const updated: Clip = { ...selectedClip, segmentation };
+    await db.updateClip(updated);
+    setSelectedClip(updated);
+    refreshClips();
+  }, [selectedClip, db, refreshClips]);
+
   const handleTogglePlayback = useCallback(() => {
     if (selectedClip) toggle(selectedClip);
   }, [selectedClip, toggle]);
@@ -945,6 +1077,10 @@ export function MidiCurator() {
           onLoadSamples={handleLoadSamples}
           loadingSamples={loadingSamples}
           onGenerateProgression={handleGenerateProgression}
+          onLoadLoopDb={handleLoadLoopDb}
+          loopDbFileName={loopDbFileName}
+          loopDbStatus={loopDbStatus}
+          loopDbEnriched={loopDbEnriched}
         />
 
         {selectedClip ? (
@@ -985,6 +1121,7 @@ export function MidiCurator() {
             onFilterByTag={setFilterTag}
             onLeadsheetChange={handleLeadsheetChange}
             onLeadsheetBoundaryMove={handleLeadsheetBoundaryMove}
+            onSegmentFromLeadsheet={selectedClip?.leadsheet ? handleSegmentFromLeadsheet : undefined}
           />
         ) : (
           <div className="mc-main">

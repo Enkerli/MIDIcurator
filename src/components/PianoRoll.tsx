@@ -3,6 +3,7 @@ import type { Clip } from '../types/clip';
 import {
   computeLayout,
   computeNoteRects,
+  buildChordWindows,
   computeGridLines,
   timeToX,
   velocityColor,
@@ -14,7 +15,7 @@ import {
   isMinimumDrag,
   snapForScissors,
 } from '../lib/piano-roll';
-import type { PianoRollLayout, TickRange } from '../lib/piano-roll';
+import type { PianoRollLayout, TickRange, NoteRole, ChordWindow } from '../lib/piano-roll';
 
 interface PianoRollProps {
   clip: Clip;
@@ -76,6 +77,118 @@ function getThemeColors(): {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 
+// ─── Note segment rendering ───────────────────────────────────────────────
+
+/**
+ * Colours for each harmonic role.
+ *
+ *  root       — warm yellow-white: visually orthogonal to both the blue
+ *               chord-tone family and the amber NCT colour
+ *  chord-tone — velocity-tinted blue (existing palette, unchanged)
+ *  nct        — warm amber, desaturated to avoid alarm-red connotations
+ *  none       — velocity-tinted blue (same as chord-tone; no leadsheet context)
+ */
+function noteRoleFill(role: NoteRole, velocity: number): string {
+  if (role === 'none' || role === 'chord-tone') return velocityColor(velocity);
+  const t = velocity / 127;
+  if (role === 'root') {
+    // Bright yellow-white: clearly distinct from blue (chord-tone) and amber (NCT)
+    const r = Math.round(220 + t * 35);
+    const g = Math.round(215 + t * 40);
+    const b = Math.round(100 + t * 60);
+    return `rgb(${r},${g},${b})`;
+  }
+  // nct — amber, velocity-modulated brightness
+  const r = Math.round(180 + t * 55);
+  const g = Math.round(120 + t * 60);
+  const b = Math.round(30  + t * 20);
+  return `rgb(${r},${g},${b})`;
+}
+
+/**
+ * Draw a single note segment with role-appropriate styling.
+ *
+ * Visual encoding (two independent axes — colour + shape/texture):
+ *
+ *  root       — yellow-white fill + bright left-edge flag bar (full height, 2px)
+ *               + strong outline. The left-edge bar reads as a "ground marker"
+ *               even in greyscale and at small note sizes.
+ *  chord-tone — solid blue fill (unchanged behaviour)
+ *  nct        — dimmed amber fill + 45° diagonal hatch stripes (texture marks
+ *               instability monochromatically) + amber outline
+ *  none       — solid blue fill (no leadsheet; unchanged behaviour)
+ */
+function drawNoteSegment(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  role: NoteRole,
+  velocity: number,
+): void {
+  const fill = noteRoleFill(role, velocity);
+
+  if (role === 'nct') {
+    // Dimmed base fill
+    ctx.fillStyle = fill;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 1;
+
+    // Diagonal hatch stripes — clip to this segment's rect
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.7;
+    // Lines at 45°, spaced 3px apart
+    const step = 3;
+    const span = w + h;
+    for (let d = -h; d < w + h; d += step) {
+      ctx.beginPath();
+      ctx.moveTo(x + d, y);
+      ctx.lineTo(x + d + span, y + span);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Amber outline
+    ctx.strokeStyle = 'rgba(200,140,40,0.5)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, y, w, h);
+
+  } else if (role === 'root') {
+    // Main fill
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, w, h);
+
+    // Left-edge flag bar: full-height, 2px wide, bright white
+    // Works as a "this is the root" marker even at 1-pixel note heights
+    const flagW = Math.min(2, w);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(x, y, flagW, h);
+
+    // Stronger outline than chord tones for extra pop
+    ctx.strokeStyle = 'rgba(255,240,120,0.7)';
+    ctx.lineWidth = 0.75;
+    ctx.strokeRect(x, y, w, h);
+
+  } else {
+    // chord-tone or none — solid fill, subtle outline (original behaviour)
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = 'rgba(128,128,128,0.2)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, y, w, h);
+  }
+}
+
 /**
  * Generate a text description of notes for screen readers.
  * Returns a summary string listing unique notes present in the clip.
@@ -112,8 +225,10 @@ export function PianoRoll({
   const dragStartX = useRef(0);
   const dragCurrentX = useRef(0);
 
-  // Scissors hover state (ref, not reactive — redraw on mousemove)
+  // Scissors hover state (refs, not reactive — redraw on mousemove)
   const scissorsHoverTick = useRef<number | null>(null);
+  // Whether the scissors cursor is hovering over an existing boundary (→ pointer cursor)
+  const scissorsHoverOnBoundary = useRef(false);
 
   // Boundary drag state (for moving existing boundaries)
   const isDraggingBoundary = useRef(false);
@@ -193,16 +308,37 @@ export function PianoRoll({
         }
       }
 
-      // Note rectangles
-      const rects = computeNoteRects(clip.gesture, clip.harmonic, layout);
-      for (const rect of rects) {
-        ctx.fillStyle = velocityColor(rect.velocity);
-        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      // ─── Note rectangles ─────────────────────────────────────────────
+      // Build chord windows from leadsheet (if present) so notes can be
+      // coloured by harmonic role. Without a leadsheet, all notes render
+      // with the plain velocity colour (unchanged behaviour).
+      const totalTicks = clip.gesture.num_bars * clip.gesture.ticks_per_bar;
+      const chordWindows: ChordWindow[] | undefined = clip.leadsheet
+        ? buildChordWindows(
+            clip.leadsheet,
+            clip.gesture.ticks_per_bar,
+            clip.gesture.ticks_per_beat,
+            totalTicks,
+          )
+        : undefined;
 
-        // Subtle border for definition
-        ctx.strokeStyle = 'rgba(128,128,128,0.2)';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      const rects = computeNoteRects(clip.gesture, clip.harmonic, layout, chordWindows);
+
+      for (const rect of rects) {
+        if (!rect.segments) {
+          // No leadsheet context — plain velocity colour (original behaviour)
+          ctx.fillStyle = velocityColor(rect.velocity);
+          ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+          ctx.strokeStyle = 'rgba(128,128,128,0.2)';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        } else {
+          // Draw each chord-window segment with its role-appropriate style
+          for (const seg of rect.segments) {
+            const sx = rect.x + seg.xOffset;
+            drawNoteSegment(ctx, sx, rect.y, seg.w, rect.h, seg.role, rect.velocity);
+          }
+        }
       }
 
       // ─── Segmentation boundaries (always rendered when present) ─────
@@ -361,13 +497,8 @@ export function PianoRoll({
       const rawTick = xToTick(x, layout);
       const hitBoundary = findBoundaryNear(x);
 
-      // Shift+click or right-click on existing boundary → remove it
-      if (hitBoundary !== null && (e.shiftKey || e.button === 2)) {
-        onBoundaryRemove?.(hitBoundary);
-        return;
-      }
-
-      // Click on existing boundary → start dragging it
+      // Click or drag on existing boundary.
+      // We always start a drag attempt; if mouseUp sees no movement it becomes a remove.
       if (hitBoundary !== null) {
         isDraggingBoundary.current = true;
         draggingBoundaryTick.current = hitBoundary;
@@ -418,7 +549,14 @@ export function PianoRoll({
         return;
       }
 
-      // Scissors mode: show hover guide line
+      // Scissors mode: show hover guide line, update cursor for boundary proximity
+      const onBoundary = findBoundaryNear(x) !== null;
+      if (onBoundary !== scissorsHoverOnBoundary.current) {
+        scissorsHoverOnBoundary.current = onBoundary;
+        // Swap cursor class: pointer when over a boundary (click = remove), scissors otherwise
+        canvas.classList.toggle('mc-piano-roll-canvas--scissors-remove', onBoundary);
+      }
+
       if (x < layout.labelWidth) {
         scissorsHoverTick.current = null;
       } else {
@@ -467,8 +605,12 @@ export function PianoRoll({
       isDraggingBoundary.current = false;
       const from = draggingBoundaryTick.current;
       const to = draggingBoundaryCurrentTick.current;
-      if (from !== null && to !== null && from !== to) {
-        onBoundaryMove?.(from, to);
+      if (from !== null && to !== null) {
+        if (from !== to) {
+          onBoundaryMove?.(from, to);   // dragged to a new position → move
+        } else {
+          onBoundaryRemove?.(from);     // no movement → click → remove
+        }
       }
       draggingBoundaryTick.current = null;
       draggingBoundaryCurrentTick.current = null;
@@ -528,10 +670,12 @@ export function PianoRoll({
     }
 
     if (scissorsMode) {
-      // Clear hover guide
+      // Clear hover guide and boundary-remove cursor
       scissorsHoverTick.current = null;
+      scissorsHoverOnBoundary.current = false;
       const canvas = canvasRef.current;
       const container = containerRef.current;
+      if (canvas) canvas.classList.remove('mc-piano-roll-canvas--scissors-remove');
       if (canvas && container) {
         draw(canvas, container.clientWidth);
       }

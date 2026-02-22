@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildChordWindows,
+  computeNoteRects,
   noteName,
   isBlackKey,
   computeLayout,
-  computeNoteRects,
   computeGridLines,
   timeToX,
   velocityColor,
@@ -15,8 +16,9 @@ import {
   isMinimumDrag,
   detectChordBlocks,
   snapForScissors,
+  segmentFromLeadsheet,
 } from '../piano-roll';
-import type { Gesture, Harmonic } from '../../types/clip';
+import type { Gesture, Harmonic, Leadsheet } from '../../types/clip';
 
 function makeFixture(): { gesture: Gesture; harmonic: Harmonic } {
   return {
@@ -451,5 +453,238 @@ describe('snapForScissors', () => {
     // Closest onset to 350 is 480 (dist 130, within 240 tolerance)
     // So it should snap to 480
     expect(snapForScissors(350, onsets, durations, tpb)).toBe(480);
+  });
+});
+
+// ─── buildChordWindows ────────────────────────────────────────────────────────
+
+/** Minimal DetectedChord for testing — only templatePcs and root matter */
+function mockChord(root: number, templatePcs: number[]) {
+  return {
+    root,
+    rootName: 'C',
+    qualityKey: 'maj',
+    symbol: 'C',
+    qualityName: 'major',
+    templatePcs,
+  };
+}
+
+function makeLeadsheet(bars: Leadsheet['bars']): Leadsheet {
+  return { inputText: '', bars };
+}
+
+describe('buildChordWindows', () => {
+  const TPB = 480;  // ticks per beat
+  const TPBAR = 1920; // ticks per bar (4/4)
+  const TOTAL = 3840; // 2 bars
+
+  it('returns empty array for a leadsheet with no bars', () => {
+    const ls = makeLeadsheet([]);
+    expect(buildChordWindows(ls, TPBAR, TPB, TOTAL)).toEqual([]);
+  });
+
+  it('single whole-bar chord covers bar exactly', () => {
+    const ls = makeLeadsheet([{
+      bar: 0,
+      isRepeat: false,
+      chords: [{ chord: mockChord(0, [0, 4, 7]), inputText: 'C', position: 0, totalInBar: 1, beatPosition: 0, duration: 4 }],
+    }]);
+    const windows = buildChordWindows(ls, TPBAR, TPB, TOTAL);
+    // One chord window from 0→1920, then a null gap 1920→3840
+    expect(windows).toHaveLength(2);
+    expect(windows[0]).toMatchObject({ startTick: 0, endTick: 1920 });
+    expect(windows[0]!.templatePcs).toEqual([0, 4, 7]);
+    expect(windows[0]!.rootPc).toBe(0);
+    expect(windows[1]).toMatchObject({ startTick: 1920, endTick: 3840, templatePcs: null, rootPc: null });
+  });
+
+  it('two chords per bar build contiguous windows within the bar', () => {
+    // Bar 0: Cmaj beats 0–2, Gmaj beats 2–4
+    const ls = makeLeadsheet([{
+      bar: 0,
+      isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0, 4, 7]), inputText: 'C', position: 0, totalInBar: 2, beatPosition: 0, duration: 2 },
+        { chord: mockChord(7, [7, 11, 2]), inputText: 'G', position: 1, totalInBar: 2, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    const windows = buildChordWindows(ls, TPBAR, TPB, TOTAL);
+    expect(windows[0]).toMatchObject({ startTick: 0, endTick: 960, rootPc: 0 });
+    expect(windows[1]).toMatchObject({ startTick: 960, endTick: 1920, rootPc: 7 });
+    // Trailing null gap
+    expect(windows[2]).toMatchObject({ startTick: 1920, endTick: 3840, templatePcs: null });
+  });
+
+  it('classifies note pitches correctly via computeNoteRects', () => {
+    // One bar: Cmaj (C E G = pcs 0,4,7), root = 0
+    // Notes: C4(60)=root, E4(64)=chord-tone, D4(62)=NCT
+    const gesture: Gesture = {
+      onsets: [0, 0, 0],
+      durations: [480, 480, 480],
+      velocities: [80, 80, 80],
+      density: 1, syncopation_score: 0, avg_velocity: 80,
+      velocity_variance: 0, avg_duration: 480,
+      num_bars: 1, ticks_per_bar: TPBAR, ticks_per_beat: TPB,
+    };
+    const harmonic: Harmonic = { pitches: [60, 64, 62], pitchClasses: [0, 4, 2] };
+    const ls = makeLeadsheet([{
+      bar: 0,
+      isRepeat: false,
+      chords: [{ chord: mockChord(0, [0, 4, 7]), inputText: 'C', position: 0, totalInBar: 1, beatPosition: 0, duration: 4 }],
+    }]);
+    const windows = buildChordWindows(ls, TPBAR, TPB, TPBAR);
+    const layout = { width: 500, height: 200, pxPerTick: 0.2, pxPerSemitone: 10, minPitch: 58, maxPitch: 66, labelWidth: 40, topPad: 4 };
+    const rects = computeNoteRects(gesture, harmonic, layout, windows);
+
+    expect(rects[0]!.segments).toHaveLength(1);
+    expect(rects[0]!.segments![0]!.role).toBe('root');        // C4
+
+    expect(rects[1]!.segments).toHaveLength(1);
+    expect(rects[1]!.segments![0]!.role).toBe('chord-tone'); // E4
+
+    expect(rects[2]!.segments).toHaveLength(1);
+    expect(rects[2]!.segments![0]!.role).toBe('nct');        // D4
+  });
+
+  it('splits a note crossing a chord boundary into two segments', () => {
+    // Bar 0 (1920 ticks): Cmaj beats 0–2 (ticks 0–960), Gmaj beats 2–4 (ticks 960–1920)
+    // Note: B4 (pc=11) from tick 720 to 1200 — chord-tone in Cmaj(B∈maj7?), NCT in Gmaj
+    // For simplicity: Cmaj template has 11, Gmaj template does not
+    const gesture: Gesture = {
+      onsets: [720],
+      durations: [480], // ends at 1200, crosses boundary at 960
+      velocities: [80],
+      density: 1, syncopation_score: 0, avg_velocity: 80,
+      velocity_variance: 0, avg_duration: 480,
+      num_bars: 1, ticks_per_bar: TPBAR, ticks_per_beat: TPB,
+    };
+    const harmonic: Harmonic = { pitches: [71], pitchClasses: [11] }; // B4, pc=11
+    const ls = makeLeadsheet([{
+      bar: 0,
+      isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0, 4, 7, 11]), inputText: 'C∆', position: 0, totalInBar: 2, beatPosition: 0, duration: 2 },
+        { chord: mockChord(7, [7, 11, 2]),    inputText: 'G',  position: 1, totalInBar: 2, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    const windows = buildChordWindows(ls, TPBAR, TPB, TPBAR);
+    const layout = { width: 500, height: 200, pxPerTick: 0.2, pxPerSemitone: 10, minPitch: 69, maxPitch: 73, labelWidth: 40, topPad: 4 };
+    const rects = computeNoteRects(gesture, harmonic, layout, windows);
+
+    const segs = rects[0]!.segments!;
+    expect(segs).toHaveLength(2);
+    // First segment: ticks 720–960 in Cmaj (pc 11 ∈ template) → chord-tone
+    expect(segs[0]!.role).toBe('chord-tone');
+    // Second segment: ticks 960–1200 in Gmaj (pc 11 ∈ template [7,11,2]) → also chord-tone here
+    // but let's verify the boundary is respected (xOffset > 0 for second segment)
+    expect(segs[1]!.xOffset).toBeGreaterThan(0);
+    // Both happen to be chord-tones in this example — check widths sum to note width
+    const totalSegW = segs.reduce((sum, s) => sum + s.w, 0);
+    const noteW = 480 * layout.pxPerTick; // 96px
+    expect(totalSegW).toBeCloseTo(noteW, 0);
+  });
+});
+
+// ─── segmentFromLeadsheet ─────────────────────────────────────────────────────
+
+describe('segmentFromLeadsheet', () => {
+  const TPB   = 480;   // ticks per beat
+  const TPBAR = 1920;  // ticks per bar (4/4)
+  // Use exactly 1-bar total so there is no trailing gap window beyond the chord content
+  const TOTAL = TPBAR;
+
+  it('returns empty array when leadsheet has no bars', () => {
+    const ls = makeLeadsheet([]);
+    expect(segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, [], [])).toEqual([]);
+  });
+
+  it('returns empty array for a single whole-bar chord (no internal boundary)', () => {
+    // One chord fills the whole bar — no chord-change boundary exists inside
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [{ chord: mockChord(0, [0,4,7]), inputText: 'C', position: 0, totalInBar: 1, beatPosition: 0, duration: 4 }],
+    }]);
+    expect(segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, [], [])).toEqual([]);
+  });
+
+  it('produces a boundary at the half-bar chord change (no note snapping)', () => {
+    // Bar 0: Cmaj beats 0–2, Gmaj beats 2–4 → internal boundary at tick 960
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0,4,7]),  inputText: 'C', position: 0, totalInBar: 2, beatPosition: 0, duration: 2 },
+        { chord: mockChord(7, [7,11,2]), inputText: 'G', position: 1, totalInBar: 2, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    // No notes → no snapping, boundary stays at raw tick 960
+    const result = segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, [], []);
+    expect(result).toEqual([960]);
+  });
+
+  it('snaps boundary to a nearby note onset', () => {
+    // Boundary at tick 960, note onset at tick 940 (within half-beat tolerance = 240 ticks)
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0,4,7]),  inputText: 'C', position: 0, totalInBar: 2, beatPosition: 0, duration: 2 },
+        { chord: mockChord(7, [7,11,2]), inputText: 'G', position: 1, totalInBar: 2, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    const onsets    = [0,   940];
+    const durations = [480, 480];
+    const result = segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, onsets, durations);
+    // 940 is 20 ticks from 960, within tolerance 240 → snaps to 940
+    expect(result).toEqual([940]);
+  });
+
+  it('does not snap to a note onset outside tolerance', () => {
+    // Boundary at 960, nearest note onset at 600 (360 ticks away, exceeds half-beat 240)
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0,4,7]),  inputText: 'C', position: 0, totalInBar: 2, beatPosition: 0, duration: 2 },
+        { chord: mockChord(7, [7,11,2]), inputText: 'G', position: 1, totalInBar: 2, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    const onsets    = [600];
+    const durations = [100];
+    const result = segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, onsets, durations);
+    // 600 is too far — boundary stays at 960
+    expect(result).toEqual([960]);
+  });
+
+  it('produces two boundaries for three chords within one bar', () => {
+    // Bar 0: 3 equal chords each 4/3 beats → internal boundaries at ticks ~640 and ~1280
+    const bpp = TPBAR / 3; // ~640 ticks per chord
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [
+        { chord: mockChord(0,  [0,4,7]),  inputText: 'C', position: 0, totalInBar: 3, beatPosition: 0,   duration: 4/3 },
+        { chord: mockChord(5,  [5,9,0]),  inputText: 'F', position: 1, totalInBar: 3, beatPosition: 4/3, duration: 4/3 },
+        { chord: mockChord(7, [7,11,2]),  inputText: 'G', position: 2, totalInBar: 3, beatPosition: 8/3, duration: 4/3 },
+      ],
+    }]);
+    const result = segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, [], []);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBeCloseTo(bpp, -1);     // ~640
+    expect(result[1]).toBeCloseTo(bpp * 2, -1); // ~1280
+  });
+
+  it('deduplicates when two raw boundaries snap to the same note onset', () => {
+    // Beat-1 boundary (480) has a note right on it; beat-2 boundary (960) is unsnapped
+    const ls = makeLeadsheet([{
+      bar: 0, isRepeat: false,
+      chords: [
+        { chord: mockChord(0, [0,4,7]),  inputText: 'C', position: 0, totalInBar: 3, beatPosition: 0, duration: 1 },
+        { chord: mockChord(5, [5,9,0]),  inputText: 'F', position: 1, totalInBar: 3, beatPosition: 1, duration: 1 },
+        { chord: mockChord(7,[7,11,2]),  inputText: 'G', position: 2, totalInBar: 3, beatPosition: 2, duration: 2 },
+      ],
+    }]);
+    const onsets    = [480];
+    const durations = [10];
+    const result = segmentFromLeadsheet(ls, TPBAR, TPB, TOTAL, onsets, durations);
+    // Result must have no duplicate entries
+    expect(result.length).toBe(new Set(result).size);
   });
 });

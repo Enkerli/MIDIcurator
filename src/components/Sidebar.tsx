@@ -19,6 +19,14 @@ interface SidebarProps {
   onLoadSamples?: () => void;
   loadingSamples?: boolean;
   onGenerateProgression?: (progressionIndex: number, keyOffset: number, voicing: VoicingShape) => void;
+  /** Called when the user picks a loop DB file (.db). */
+  onLoadLoopDb?: (file: File) => void;
+  /** Filename of the currently-loaded loop DB, or null. */
+  loopDbFileName?: string | null;
+  /** Loading / result status of the DB operation. */
+  loopDbStatus?: 'idle' | 'loading' | 'ok' | 'error';
+  /** Number of existing clips that were enriched with loop metadata. */
+  loopDbEnriched?: number;
 }
 
 export function Sidebar({
@@ -34,7 +42,29 @@ export function Sidebar({
   onLoadSamples,
   loadingSamples,
   onGenerateProgression,
+  onLoadLoopDb,
+  loopDbFileName,
+  loopDbStatus = 'idle',
+  loopDbEnriched = 0,
 }: SidebarProps) {
+  const loopDbInputRef = { current: null as HTMLInputElement | null };
+
+  const loopDbLabel = loopDbStatus === 'loading'
+    ? '🗄 Loading…'
+    : loopDbStatus === 'error'
+    ? '🗄 DB Error'
+    : loopDbFileName
+    ? '🗄 DB ✓'
+    : '🗄 Loop DB';
+
+  const loopDbTitle = loopDbStatus === 'error'
+    ? 'Failed to load. Select LogicLoopsDatabaseV11.db from ~/Music/Audio Music Apps/Databases/'
+    : loopDbStatus === 'loading'
+    ? 'Loading loop database…'
+    : loopDbFileName
+    ? `Loop DB loaded: ${loopDbFileName}. Click to reload.`
+    : 'Load LogicLoopsDatabaseV11.db from ~/Music/Audio Music Apps/Databases/';
+
   return (
     <div className="mc-sidebar">
       <div className="mc-sidebar-header">
@@ -43,6 +73,50 @@ export function Sidebar({
       </div>
 
       <DropZone onFilesDropped={onFilesDropped} fileInputRef={fileInputRef} />
+
+      {onLoadLoopDb && (
+        <div className="mc-loop-db-row">
+          <button
+            className={[
+              'mc-btn--loop-db',
+              loopDbStatus === 'ok' ? 'is-loaded' : '',
+              loopDbStatus === 'error' ? 'is-error' : '',
+              loopDbStatus === 'loading' ? 'is-loading' : '',
+            ].filter(Boolean).join(' ')}
+            title={loopDbTitle}
+            disabled={loopDbStatus === 'loading'}
+            onClick={() => loopDbInputRef.current?.click()}
+          >
+            {loopDbLabel}
+          </button>
+          {loopDbStatus === 'ok' && loopDbFileName && (
+            <span className="mc-loop-db-name" title={loopDbFileName}>
+              {loopDbFileName}
+              {loopDbEnriched > 0 && (
+                <span className="mc-loop-db-enriched" title={`${loopDbEnriched} existing clip(s) enriched with loop metadata`}>
+                  {' '}+{loopDbEnriched}
+                </span>
+              )}
+            </span>
+          )}
+          {loopDbStatus === 'ok' && loopDbEnriched === 0 && loopDbFileName && (
+            <span className="mc-loop-db-name mc-loop-db-name--hint">
+              no matches
+            </span>
+          )}
+          <input
+            ref={el => { loopDbInputRef.current = el; }}
+            type="file"
+            accept=".db,.sqlite"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) onLoadLoopDb(f);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
 
       {onGenerateProgression && (
         <ProgressionGenerator onGenerate={onGenerateProgression} />

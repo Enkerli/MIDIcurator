@@ -22,6 +22,7 @@ import {
   rotatePcs,
   rootName,
   spellInChordContext,
+  findQualityByKey,
 } from './chord-dictionary';
 
 export type { ChordMatch } from './chord-dictionary';
@@ -505,4 +506,356 @@ export function detectChordsForSegments(
   }
 
   return results;
+}
+
+// ─── Segment degree description ─────────────────────────────────────────────
+
+/**
+ * Describe which chord degrees are present in a segment, relative to a known
+ * leadsheet chord.  Returns a compact string like "R 3 ♭7" for the chord tones
+ * that are actually sounded, optionally suffixed with "+N" where N is the number
+ * of non-chord-tone pitch classes (e.g. "R 3 ♭7 +1").
+ *
+ * Returns null when there is no usable context (no rootPc, no qualityKey, or no
+ * notes in the segment).
+ *
+ * @param segmentPitches  MIDI pitches (absolute) for notes sounding in the segment
+ * @param rootPc          Root pitch class of the leadsheet chord (0-11)
+ * @param qualityKey      Quality key string (e.g. "maj7", "min", "7b9")
+ */
+export function describeSegmentDegrees(
+  segmentPitches: number[],
+  rootPc: number | null,
+  qualityKey: string | null | undefined,
+): string | null {
+  if (rootPc === null || !qualityKey || segmentPitches.length === 0) return null;
+
+  const quality = findQualityByKey(qualityKey);
+  if (!quality) return null;
+
+  // Build interval-name map: root-relative semitones → interval label
+  // quality.pcs[i] and quality.intervals[i] are parallel
+  const degreeMap = new Map<number, string>();
+  for (let i = 0; i < quality.pcs.length; i++) {
+    const relPc = ((quality.pcs[i]! % 12) + 12) % 12;
+    degreeMap.set(relPc, quality.intervals[i]!);
+  }
+
+  // Build a map from pitch class → lowest sounding MIDI pitch in this segment.
+  // This lets us sort degrees by range order (lowest note first) so inversions
+  // are immediately visible — if the root isn't the bass, it won't appear first.
+  const lowestPitchForPc = new Map<number, number>();
+  for (const p of segmentPitches) {
+    const pc = ((p % 12) + 12) % 12;
+    const current = lowestPitchForPc.get(pc);
+    if (current === undefined || p < current) lowestPitchForPc.set(pc, p);
+  }
+
+  // Collect unique pitch classes present in the segment
+  const uniquePcs = [...lowestPitchForPc.keys()];
+
+  // Partition into chord tones (with degree name) and NCTs (named by interval)
+  const presentDegrees: Array<{ label: string; lowestPitch: number }> = [];
+  const nctLabels: Array<{ label: string; lowestPitch: number }> = [];
+
+  for (const pc of uniquePcs) {
+    const relPc = ((pc - rootPc) + 12) % 12;
+    const lowestPitch = lowestPitchForPc.get(pc)!;
+    const label = degreeMap.get(relPc);
+    if (label !== undefined) {
+      if (!presentDegrees.some(d => d.label === label)) {
+        presentDegrees.push({ label, lowestPitch });
+      }
+    } else {
+      const nctLabel = intervalLabel(relPc);
+      if (!nctLabels.some(d => d.label === nctLabel)) {
+        nctLabels.push({ label: nctLabel, lowestPitch });
+      }
+    }
+  }
+
+  if (presentDegrees.length === 0 && nctLabels.length === 0) return null;
+
+  // Sort both groups by the lowest sounding pitch (range order, not interval order)
+  const ctPart = presentDegrees
+    .sort((a, b) => a.lowestPitch - b.lowestPitch)
+    .map(d => d.label)
+    .join(' ');
+
+  const nctPart = nctLabels
+    .sort((a, b) => a.lowestPitch - b.lowestPitch)
+    .map(d => d.label)
+    .join(' ');
+
+  return nctPart ? `${ctPart} (${nctPart})` : ctPart || null;
+}
+
+// ─── Segment texture analysis ───────────────────────────────────────────────
+
+/**
+ * High-level characterisation of how a chord is realised in a segment.
+ *
+ *  'block'     — 3+ chord tones onset simultaneously (block chord / stab)
+ *  'shell'     — block chord, root + 3rd + 7th only (guide tones, no 5th)
+ *  'inversion' — block chord where the lowest pitch is not the root
+ *  'arpeggio'  — chord tones played sequentially (broken chord)
+ *  'bassline'  — single-note motion, predominantly chord tones
+ *  'melody'    — single-note motion with non-chord tones present
+ *  'sustained' — a single note (or unison) held through most of the segment
+ *  'mixed'     — simultaneous and sequential content that doesn't fit above
+ *  'sparse'    — only 1 unique pitch class; can't characterise texture
+ *  'empty'     — no notes at all
+ */
+export type SegmentTexture =
+  | 'block'
+  | 'shell'
+  | 'inversion'
+  | 'arpeggio'
+  | 'bassline'
+  | 'melody'
+  | 'sustained'
+  | 'mixed'
+  | 'sparse'
+  | 'empty';
+
+/**
+ * Short display label for each texture (fits in a narrow chip).
+ */
+export const TEXTURE_LABEL: Record<SegmentTexture, string> = {
+  block:     'block',
+  shell:     'shell',
+  inversion: 'inv',
+  arpeggio:  'arp',
+  bassline:  'bass',
+  melody:    'mel',
+  sustained: 'sus',
+  mixed:     'mix',
+  sparse:    '–',
+  empty:     '–',
+};
+
+/**
+ * Analyse the textural character of a segment relative to its leadsheet chord.
+ *
+ * @param pitches      All MIDI pitches in the clip (parallel with onsets/durations)
+ * @param onsets       All onset ticks
+ * @param durations    All durations
+ * @param segStart     Segment start tick (inclusive)
+ * @param segEnd       Segment end tick (exclusive)
+ * @param templatePcs  Chord tone pitch-classes from the leadsheet chord (may be empty/null)
+ * @param rootPc       Root pitch-class of the leadsheet chord (or null)
+ */
+export function analyseSegmentTexture(
+  pitches: number[],
+  onsets: number[],
+  durations: number[],
+  segStart: number,
+  segEnd: number,
+  templatePcs: number[] | null,
+  rootPc: number | null,
+): SegmentTexture {
+  // Gather notes that sound within this segment
+  const segNotes: Array<{ pitch: number; onset: number; duration: number }> = [];
+  for (let i = 0; i < onsets.length; i++) {
+    const onset = onsets[i]!;
+    const dur   = durations[i]!;
+    const noteEnd = onset + dur;
+    // Include notes that onset in the segment, or sustain into it from before
+    if ((onset >= segStart && onset < segEnd) || (onset < segStart && noteEnd > segStart)) {
+      segNotes.push({ pitch: pitches[i]!, onset, duration: dur });
+    }
+  }
+
+  if (segNotes.length === 0) return 'empty';
+
+  const uniquePcs = [...new Set(segNotes.map(n => n.pitch % 12))];
+  if (uniquePcs.length === 1) return 'sparse';
+
+  const template = new Set(templatePcs ?? []);
+  const hasTemplate = template.size > 0;
+
+  // Count notes that onset inside the segment (not just sustaining in)
+  const onsetNotes = segNotes.filter(n => n.onset >= segStart && n.onset < segEnd);
+
+  // ── Block detection: notes that start simultaneously (within BLOCK_TOLERANCE) ──
+  // Group onset-notes by quantized onset
+  const onsetGroups = new Map<number, typeof onsetNotes>();
+  for (const n of onsetNotes) {
+    const key = Math.round(n.onset / BLOCK_TOLERANCE) * BLOCK_TOLERANCE;
+    if (!onsetGroups.has(key)) onsetGroups.set(key, []);
+    onsetGroups.get(key)!.push(n);
+  }
+
+  const blocks = [...onsetGroups.values()].filter(g => g.length >= 2);
+
+  // Count how many onset-notes land in a simultaneous group vs alone.
+  // A pattern is "block-dominant" only when most notes are in groups —
+  // this prevents a bass+first-arp-note pair from masking an arpeggio.
+  const notesInBlocks = blocks.reduce((sum, g) => sum + g.length, 0);
+  const blockFraction = onsetNotes.length > 0 ? notesInBlocks / onsetNotes.length : 0;
+  const isBlockDominant = blockFraction >= 0.67;
+
+  // ── Single sustained note: only one distinct onset group of size 1,
+  //    and the note's duration covers most of the segment ──
+  const segDuration = segEnd - segStart;
+  if (onsetNotes.length === 1) {
+    const n = onsetNotes[0]!;
+    const soundingLen = Math.min(n.onset + n.duration, segEnd) - Math.max(n.onset, segStart);
+    if (soundingLen >= segDuration * 0.7) return 'sustained';
+  }
+  // Also catch: all notes are the same pitch (unison doublings, octave)
+  if (onsetNotes.length > 0 && new Set(onsetNotes.map(n => n.pitch % 12)).size === 1) {
+    const longestSounding = Math.max(...onsetNotes.map(n =>
+      Math.min(n.onset + n.duration, segEnd) - Math.max(n.onset, segStart)
+    ));
+    if (longestSounding >= segDuration * 0.7) return 'sustained';
+  }
+
+  if (isBlockDominant) {
+    // Find the largest block (most simultaneous notes)
+    const largestBlock = blocks.reduce((a, b) => a.length >= b.length ? a : b);
+    const blockPcs = new Set(largestBlock.map(n => n.pitch % 12));
+
+    // Shell voicing: contains root, 3rd (±4 from root), 7th (±10 or 11 from root),
+    // but NOT the 5th (7 semitones from root). Requires a template with a root.
+    if (hasTemplate && rootPc !== null && blockPcs.has(rootPc % 12)) {
+      const relIntervals = [...blockPcs].map(pc => ((pc - rootPc) + 12) % 12);
+      const has3rd  = relIntervals.includes(3) || relIntervals.includes(4);
+      const has7th  = relIntervals.includes(10) || relIntervals.includes(11);
+      const has5th  = relIntervals.includes(7);
+      const has5thAlt = relIntervals.includes(6) || relIntervals.includes(8); // b5 / #5
+      if (has3rd && has7th && !has5th && !has5thAlt && blockPcs.size <= 4) {
+        return 'shell';
+      }
+    }
+
+    // Inversion: block chord where the lowest sounding note ≠ root
+    if (hasTemplate && rootPc !== null) {
+      const lowestPitch = Math.min(...largestBlock.map(n => n.pitch));
+      const lowestPc = lowestPitch % 12;
+      if (lowestPc !== rootPc % 12 && template.has(lowestPc)) {
+        return 'inversion';
+      }
+    }
+
+    return 'block';
+  }
+
+  // ── Mostly sequential motion (solo notes dominate) ──
+  if (!hasTemplate) {
+    // Without a template we can't distinguish bassline from melody
+    return uniquePcs.length <= 3 ? 'bassline' : 'melody';
+  }
+
+  const ctNotes    = onsetNotes.filter(n => template.has(((n.pitch % 12) + 12) % 12));
+  const nctNotes   = onsetNotes.filter(n => !template.has(((n.pitch % 12) + 12) % 12));
+  const ctFraction = onsetNotes.length > 0 ? ctNotes.length / onsetNotes.length : 0;
+
+  // Arpeggio: mostly chord tones, more than one unique CT pitch class
+  const uniqueCtPcs = new Set(ctNotes.map(n => n.pitch % 12));
+  if (ctFraction >= 0.75 && uniqueCtPcs.size >= 2) return 'arpeggio';
+
+  // Bassline: high chord-tone fraction, few unique PCs (linear, not spread)
+  if (ctFraction >= 0.6 && uniquePcs.length <= 4 && nctNotes.length <= 1) return 'bassline';
+
+  // Melody: NCTs dominate or are significant
+  if (nctNotes.length > 0 && ctFraction < 0.75) return 'melody';
+
+  // Fallback for mixed content
+  return 'mixed';
+}
+
+/**
+ * Returns a compact glyph summarising the textural shape of a segment,
+ * to be appended to the degree label in the chord bar.
+ *
+ * Only two textures get glyphs (per the design intent):
+ *   Block / shell chord that fills the whole segment → '■'  (or '□' for shell)
+ *   Arpeggio with a clear direction                  → '↑' / '↓' / '↑↓' / '↓↑'
+ *
+ * Everything else (melody, bassline, mixed, sparse, …) → null.
+ *
+ * @param pitches     All MIDI pitches in the clip
+ * @param onsets      All onset ticks (parallel with pitches)
+ * @param durations   All durations (parallel with pitches)
+ * @param segStart    Segment start tick (inclusive)
+ * @param segEnd      Segment end tick (exclusive)
+ * @param templatePcs Chord-tone pitch classes from the leadsheet chord
+ * @param rootPc      Root pitch class of the leadsheet chord
+ */
+export function segmentTextureGlyph(
+  pitches: number[],
+  onsets: number[],
+  durations: number[],
+  segStart: number,
+  segEnd: number,
+  templatePcs: number[] | null,
+  rootPc: number | null,
+): string | null {
+  const texture = analyseSegmentTexture(
+    pitches, onsets, durations, segStart, segEnd, templatePcs, rootPc,
+  );
+
+  // ── Block glyphs ────────────────────────────────────────────────────────────
+  if (texture === 'block') return '■';
+  if (texture === 'shell') return '□';
+
+  // ── Arpeggio direction ──────────────────────────────────────────────────────
+  if (texture === 'arpeggio') {
+    // Collect chord-tone notes that onset within the segment, in onset order.
+    const template = new Set(templatePcs ?? []);
+    const ctNotes: Array<{ pitch: number; onset: number }> = [];
+    for (let i = 0; i < onsets.length; i++) {
+      const onset = onsets[i]!;
+      if (onset < segStart || onset >= segEnd) continue;
+      const pc = ((pitches[i]! % 12) + 12) % 12;
+      if (template.size === 0 || template.has(pc)) {
+        ctNotes.push({ pitch: pitches[i]!, onset });
+      }
+    }
+    ctNotes.sort((a, b) => a.onset - b.onset);
+
+    if (ctNotes.length < 2) return null;
+
+    // Walk the pitch sequence and record direction changes.
+    // A "run" is a consecutive group of same-direction steps.
+    // We count ascending (↑) and descending (↓) steps.
+    let ups = 0;
+    let downs = 0;
+    // Also track whether there's a clear single reversal point (up-then-down or down-then-up)
+    let lastDir: 1 | -1 | 0 = 0;
+    let dirChanges = 0;
+
+    for (let i = 1; i < ctNotes.length; i++) {
+      const delta = ctNotes[i]!.pitch - ctNotes[i - 1]!.pitch;
+      if (delta === 0) continue; // skip unisons / repeated pitch
+      const dir: 1 | -1 = delta > 0 ? 1 : -1;
+      if (dir === 1) ups++;
+      else downs++;
+      if (lastDir !== 0 && dir !== lastDir) dirChanges++;
+      lastDir = dir;
+    }
+
+    if (ups === 0 && downs === 0) return null; // all unisons
+
+    // Pure direction: at most one negligible step in the other direction
+    const total = ups + downs;
+    if (downs === 0 || ups / total >= 0.85) return '↑';
+    if (ups === 0 || downs / total >= 0.85) return '↓';
+
+    // Mixed (ups and downs roughly balanced) — covers both single-arch and
+    // repeating up-down patterns across multiple bars.
+    // Use the first non-unison step to determine which direction leads.
+    if (ups / total >= 0.3 && downs / total >= 0.3) {
+      for (let i = 1; i < ctNotes.length; i++) {
+        const delta = ctNotes[i]!.pitch - ctNotes[i - 1]!.pitch;
+        if (delta === 0) continue;
+        return delta > 0 ? '↑↓' : '↓↑';
+      }
+    }
+
+    return null; // irregular / indeterminate
+  }
+
+  return null;
 }
