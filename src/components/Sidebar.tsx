@@ -1,6 +1,7 @@
 import { type RefObject, useState, useMemo } from 'react';
 import type { Clip } from '../types/clip';
 import type { VoicingShape } from '../lib/progressions';
+import { getEffectiveBarChords } from '../lib/gesture';
 import { DropZone } from './DropZone';
 import { ClipCard } from './ClipCard';
 import { ThemeToggle } from './ThemeToggle';
@@ -59,7 +60,7 @@ export function Sidebar({
   const unknownChords = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const clip of allClips) {
-      const bars = clip.harmonic?.barChords ?? [];
+      const bars = getEffectiveBarChords(clip) ?? [];
       for (const b of bars) {
         const sym = b.chord?.symbol ?? '';
         if (sym && (sym.includes('?') || sym.includes('['))) {

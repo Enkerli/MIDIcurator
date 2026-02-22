@@ -14,6 +14,7 @@ import { ActionBar } from './ActionBar';
 import { VariantInfo } from './VariantInfo';
 import { downloadChordDebug } from '../lib/midi-export';
 import { parseChordSymbol } from '../lib/chord-parser';
+import { getEffectiveBarChords } from '../lib/gesture';
 
 interface ClipDetailProps {
   clip: Clip;
@@ -264,7 +265,7 @@ export function ClipDetail({
         )}
         {clip.harmonic.barChords && clip.harmonic.barChords.length > 0 && (
           <ChordBar
-            barChords={clip.harmonic.barChords}
+            barChords={getEffectiveBarChords(clip) ?? clip.harmonic.barChords}
             ticksPerBar={clip.gesture.ticks_per_bar}
             ticksPerBeat={clip.gesture.ticks_per_beat}
             totalTicks={totalTicks}

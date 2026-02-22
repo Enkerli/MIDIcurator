@@ -645,6 +645,47 @@ body {
   font-size: 11px;
 }
 
+/* Import warnings banner */
+.mc-import-warnings {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: var(--color-bg-elevated, #2a1f00);
+  border: 1px solid #c8861a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 520px;
+  width: calc(100vw - 48px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  font-size: 12px;
+}
+.mc-import-warnings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: #c8861a;
+  margin-bottom: 4px;
+}
+.mc-import-warnings-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted, #888);
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.mc-import-warnings-dismiss:hover { color: var(--color-text, #eee); }
+.mc-import-warnings-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  color: var(--color-text-muted, #aaa);
+}
+.mc-import-warnings-list li { margin: 2px 0; }
+
 .mc-btn--download-flagged {
   padding: 4px 8px;
   background: var(--mc-accent);

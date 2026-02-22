@@ -5,7 +5,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePlayback } from '../hooks/usePlayback';
 import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcuratorSegments } from '../lib/midi-parser';
 import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
-import { extractGesture, extractHarmonic, toDetectedChord } from '../lib/gesture';
+import { extractGesture, extractHarmonic, toDetectedChord, getEffectiveBarChords } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
@@ -64,6 +64,7 @@ export function MidiCurator() {
   const [loopDbFileName, setLoopDbFileName] = useState<string | null>(null);
   const [loopDbStatus, setLoopDbStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
   const [loopDbEnriched, setLoopDbEnriched] = useState<number>(0);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectClip = useCallback(async (clip: Clip) => {
@@ -216,7 +217,7 @@ export function MidiCurator() {
 
     const timeSig = extractTimeSignature(midiData);
     const gesture = extractGesture(notes, midiData.ticksPerBeat, timeSig);
-    const harmonic = extractHarmonic(notes, gesture);
+    let harmonic = extractHarmonic(notes, gesture);
 
     // Extract MCURATOR segmentation metadata (if present)
     const mcurator = extractMcuratorSegments(midiData);
@@ -269,6 +270,24 @@ export function MidiCurator() {
       segmentation = computeSegmentationFromLeadsheet(gesture, harmonic, leadsheet);
     }
 
+    // When a leadsheet is present (e.g. from Apple Loop Sequ data), override
+    // barChords with leadsheet-derived chords rather than MIDI note detection.
+    // MIDI note detection works well for pad/chord loops but produces phantom
+    // chords for melodic/monophonic loops — the Sequ annotation is authoritative.
+    if (leadsheet && harmonic.barChords) {
+      const leadsheetBarMap = new Map(leadsheet.bars.map(lb => [lb.bar, lb]));
+      harmonic = {
+        ...harmonic,
+        barChords: harmonic.barChords.map(bc => {
+          const lb = leadsheetBarMap.get(bc.bar);
+          if (!lb || lb.isRepeat || lb.chords.length === 0) return bc;
+          // Use the first chord in the bar (bar opener, lowest beatPosition).
+          const primary = lb.chords[0]!;
+          return { ...bc, chord: primary.chord };
+        }),
+      };
+    }
+
     // Prefer live DB lookup (passed in), fall back to embedded MIDI metadata.
     const resolvedLoopMeta = loopMeta ?? mcurator?.loopMeta;
 
@@ -308,6 +327,8 @@ export function MidiCurator() {
   const handleFileUpload = useCallback(async (files: File[]) => {
     if (!db) return;
 
+    const warnings: string[] = [];
+
     for (const file of files) {
       try {
         // ── Apple Loops files (.aif, .aiff, .caf) ──────────────────
@@ -317,6 +338,7 @@ export function MidiCurator() {
 
           if (!result.midi) {
             console.warn('Apple Loop has no embedded MIDI:', file.name);
+            warnings.push(`${file.name}: no embedded MIDI found — skipped`);
             continue;
           }
 
@@ -363,9 +385,11 @@ export function MidiCurator() {
         await importMidiBuffer(arrayBuffer, file.name);
       } catch (error) {
         console.error('Error importing', file.name, error);
+        warnings.push(`${file.name}: error — ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
+    if (warnings.length > 0) setImportWarnings(w => [...w, ...warnings]);
     refreshClips();
   }, [db, refreshClips, importMidiBuffer]);
 
@@ -834,7 +858,7 @@ export function MidiCurator() {
         if (q === 'chord') {
           // Clips with at least one bar whose chord symbol contains '?' or '[' (unrecognised quality)
           return clips.filter(c => {
-            const chords = c.harmonic?.barChords;
+            const chords = getEffectiveBarChords(c);
             if (!chords) return false;
             return chords.some(b => b.chord && (b.chord.symbol.includes('?') || b.chord.symbol.includes('[')));
           });
@@ -1097,6 +1121,21 @@ export function MidiCurator() {
       >
         {announcement}
       </div>
+      {importWarnings.length > 0 && (
+        <div className="mc-import-warnings" role="alert">
+          <div className="mc-import-warnings-header">
+            <span>⚠ {importWarnings.length} file{importWarnings.length !== 1 ? 's' : ''} skipped during import</span>
+            <button
+              className="mc-import-warnings-dismiss"
+              onClick={() => setImportWarnings([])}
+              aria-label="Dismiss warnings"
+            >✕</button>
+          </div>
+          <ul className="mc-import-warnings-list">
+            {importWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </div>
+      )}
       <div className="mc-layout">
         <Sidebar
           clips={filteredClips}

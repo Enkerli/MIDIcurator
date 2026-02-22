@@ -1,4 +1,4 @@
-import type { Note, Gesture, Harmonic, DetectedChord, BarChordInfo } from '../types/clip';
+import type { Note, Gesture, Harmonic, DetectedChord, BarChordInfo, Clip } from '../types/clip';
 import { detectOverallChord, detectChordsPerBar, type ChordMatch } from './chord-detect';
 
 export function computeSyncopation(
@@ -121,4 +121,29 @@ export function extractHarmonic(notes: Note[], gesture?: Gesture): Harmonic {
   }
 
   return { pitches, pitchClasses, detectedChord, barChords };
+}
+
+/**
+ * Return effective per-bar chords for a clip.
+ *
+ * When a leadsheet is present (e.g. from Apple Loop Sequ data), the leadsheet
+ * is authoritative for chord identity — especially important for melodic/
+ * monophonic loops where MIDI note detection produces phantom union-chords.
+ * The MIDI-detected pitchClasses are preserved (for piano-roll highlighting);
+ * only the chord symbol is overridden from the leadsheet.
+ *
+ * Falls back to harmonic.barChords as-is when no leadsheet is available,
+ * which is the correct behaviour for regular chord/pad loops.
+ */
+export function getEffectiveBarChords(clip: Clip): BarChordInfo[] | undefined {
+  const raw = clip.harmonic.barChords;
+  if (!raw || !clip.leadsheet || clip.leadsheet.bars.length === 0) return raw;
+
+  const leadsheetBarMap = new Map(clip.leadsheet.bars.map(lb => [lb.bar, lb]));
+  return raw.map(bc => {
+    const lb = leadsheetBarMap.get(bc.bar);
+    if (!lb || lb.isRepeat || lb.chords.length === 0) return bc;
+    // Use the first chord in the bar (bar opener); preserve pitchClasses.
+    return { ...bc, chord: lb.chords[0]!.chord };
+  });
 }

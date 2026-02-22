@@ -3,6 +3,7 @@ import type { Clip, DetectedChord } from '../types/clip';
 import { rootName, spellInChordContext, buildChordToneSpellingMap, findQualityByKey } from '../lib/chord-dictionary';
 import { keyTypeLabel, rootPcName, gbLoopTypeLabel } from '../lib/loop-database';
 import { parseChordSymbol } from '../lib/chord-parser';
+import { getEffectiveBarChords } from '../lib/gesture';
 
 interface StatsGridProps {
   clip: Clip;
@@ -39,7 +40,8 @@ function getChordInfoAtTime(
   time: number,
   isPlaying: boolean,
 ): { chord: DetectedChord | null | undefined; pitchClasses: number[] } {
-  if (!isPlaying || time <= 0 || !clip.harmonic.barChords || clip.harmonic.barChords.length === 0) {
+  const effectiveBarChords = getEffectiveBarChords(clip);
+  if (!isPlaying || time <= 0 || !effectiveBarChords || effectiveBarChords.length === 0) {
     return {
       chord: clip.harmonic.detectedChord,
       pitchClasses: clip.harmonic.pitchClasses || [],
@@ -52,8 +54,8 @@ function getChordInfoAtTime(
   const currentBar = Math.floor(currentTick / clip.gesture.ticks_per_bar);
 
   // Find the bar chord
-  if (currentBar >= 0 && currentBar < clip.harmonic.barChords.length) {
-    const barInfo = clip.harmonic.barChords[currentBar];
+  if (currentBar >= 0 && currentBar < effectiveBarChords.length) {
+    const barInfo = effectiveBarChords[currentBar];
 
     // Check for sub-bar segments
     if (barInfo.segments && barInfo.segments.length > 1) {

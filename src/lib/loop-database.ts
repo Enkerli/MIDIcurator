@@ -383,12 +383,13 @@ export function keyTypeLabel(keyType: number): string {
   return KEY_TYPE_LABELS[keyType] ?? String(keyType);
 }
 
-// gbLoopType values (from observed DB data):
-//   0 = Classic (audio-only loop), 1 = Pattern (step-sequencer / Session Player),
-//   2 = Live Loops
+// gbLoopType values (from observed DB data + cross-referencing hasMidi):
+//   0 = Classic (audio-only loop, hasMidi=0 for almost all)
+//   1 = MIDI / Software Instrument (hasMidi=1 or 6; includes Hybrid Textures, synths, etc.)
+//   2 = Live Loops (hasMidi=2 exclusively; newer loop format)
 const GB_LOOP_TYPE_LABELS: Record<number, string> = {
   0: 'Classic',
-  1: 'Pattern',
+  1: 'MIDI',
   2: 'Live Loops',
 };
 
