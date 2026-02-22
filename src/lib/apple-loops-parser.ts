@@ -177,7 +177,10 @@ function decodeRootNote(
  */
 function decodePositionTick(b18: number, b19: number, b1a: number): number {
   const main = b19 | (b1a << 8);
-  return (main - 0x96) * 128 - b18 * 8;
+  // Clamp to 0: large b18 values can produce negative ticks when the fractional
+  // subtraction (b18*8) exceeds the integer position contribution. This happens
+  // when b19 is close to the origin (0x96) but b18 is large (e.g. 0x84).
+  return Math.max(0, (main - 0x96) * 128 - b18 * 8);
 }
 
 /**
@@ -766,18 +769,21 @@ export function appleLoopEventsToLeadsheet(
     // all bars (not just within this bar), so chords span bar boundaries naturally.
     const barEnd = (barIdx + 1) * beatsPerBar;
 
-    const chords: LeadsheetChord[] = barEvents.map((event, position) => {
+    const rawChords: LeadsheetChord[] = barEvents.map((event, position) => {
       const { chord, symbol } = appleLoopEventToDetectedChord(event);
 
-      // beatPosition within the bar (0 = bar start)
-      const beatPosition = event.positionBeats - barIdx * beatsPerBar;
+      // beatPosition within the bar (0 = bar start).
+      // Clamp to 0: the position formula can yield small negative ticks when b18 is
+      // large relative to b19 (e.g. Unsure Paths 02 record 0 decodes to beat -1.4
+      // due to a large fractional subtraction byte). Treat those as bar start.
+      const beatPosition = Math.max(0, event.positionBeats - barIdx * beatsPerBar);
 
       // Duration = distance to next chord in this bar, or fill to bar end.
       const nextEvent = barEvents[position + 1];
       const nextBeat = nextEvent
-        ? nextEvent.positionBeats - barIdx * beatsPerBar
+        ? Math.max(beatPosition, nextEvent.positionBeats - barIdx * beatsPerBar)
         : barEnd - barIdx * beatsPerBar;
-      const duration = nextBeat - beatPosition;
+      const duration = Math.max(0, nextBeat - beatPosition);
 
       return {
         chord,
@@ -788,6 +794,24 @@ export function appleLoopEventsToLeadsheet(
         duration,
       };
     });
+
+    // If the first event in this bar doesn't start at beat 0 and we have a
+    // previous chord, prepend a carried segment to fill the gap at the bar start.
+    // This covers patterns like Timid Tremble Synth where the chord changes
+    // mid-bar and the new bar inherits the tail of the previous bar's last chord.
+    const firstBeat = rawChords[0]?.beatPosition ?? 0;
+    const chords: LeadsheetChord[] = (firstBeat > 0 && lastChord)
+      ? [
+          {
+            ...lastChord,
+            position: 0,
+            totalInBar: rawChords.length + 1,
+            beatPosition: 0,
+            duration: firstBeat,
+          },
+          ...rawChords.map((c, i) => ({ ...c, position: i + 1, totalInBar: rawChords.length + 1 })),
+        ]
+      : rawChords;
 
     lastChord = chords[chords.length - 1]!;
 
