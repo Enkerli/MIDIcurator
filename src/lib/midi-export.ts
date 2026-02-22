@@ -295,6 +295,19 @@ export function downloadAllClips(clips: Clip[]): void {
   });
 }
 
+/** Derive a ZIP folder path from a clip's metadata.
+ *  Priority: loopMeta.folderPath → sourceFilename stem → flat (no folder)
+ *  folderPath uses " / " separators from extractFolderPath(); convert to ZIP "/".
+ */
+function clipZipFolder(clip: Clip): string {
+  if (clip.loopMeta?.folderPath) {
+    // "Apple Loops / Alpha Waves" → "Apple Loops/Alpha Waves/"
+    return clip.loopMeta.folderPath.split(' / ').join('/') + '/';
+  }
+  // Future: other source types can add their own folder logic here.
+  return '';
+}
+
 export async function downloadAllAsZip(clips: Clip[], zipName = 'MIDIcurator-export.zip'): Promise<void> {
   const files = clips.map(clip => {
     const title = clip.filename.replace(/\.mid$/i, '');
@@ -302,7 +315,8 @@ export async function downloadAllAsZip(clips: Clip[], zipName = 'MIDIcurator-exp
       clip.gesture, clip.harmonic, clip.bpm, clip.segmentation, clip.leadsheet,
       title, clip.sourceFilename, clip.notes || undefined, clip.loopMeta,
     );
-    return { name: clip.filename, data: midiData };
+    const folder = clipZipFolder(clip);
+    return { name: `${folder}${clip.filename}`, data: midiData };
   });
 
   const zipData = createZip(files);
