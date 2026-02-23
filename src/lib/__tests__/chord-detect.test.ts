@@ -480,14 +480,13 @@ describe('ChordMatch — extras & observed PCs (HARMONY_ENGINE §3–4)', () => 
   });
 
   it('extras populated when input has tones outside template', () => {
-    // D minor + Eb (passing tone): {D, Eb, F, A} → D minor with Eb extra
+    // {D, Eb, F, A} — since mb9 [0,1,3,7] is now in the dictionary, this is an exact Dm(♭9) match
     const match = detectChord([62, 63, 65, 69]);
     expect(match).not.toBeNull();
     expect(match!.root).toBe(2); // D
-    expect(match!.quality.key).toBe('min'); // base chord is D minor
-    expect(match!.extras).toContain(3); // Eb (pc 3) is extra
+    expect(match!.quality.key).toBe('mb9'); // exact Dm(♭9) match
+    expect(match!.extras).toHaveLength(0); // exact match, no extras
     expect(match!.observedPcs).toEqual(expect.arrayContaining([2, 3, 5, 9]));
-    expect(match!.symbol).toContain('add'); // symbol should reflect the extra
   });
 
   it('{D,G,A} → Dsus4', () => {
@@ -518,10 +517,11 @@ describe('ChordMatch — extras & observed PCs (HARMONY_ENGINE §3–4)', () => 
   });
 
   it('subset match reports extras correctly', () => {
-    // C major + F# passing tone: {C, E, F#, G} → C major with F# extra
+    // {C, E, F#, G} — since add#11 [0,4,6,7] is now in the dictionary, this is an exact C(♯11) match
     const match = detectChord([60, 64, 66, 67]);
     expect(match).not.toBeNull();
-    expect(match!.extras.length).toBeGreaterThan(0);
+    expect(match!.quality.key).toBe('add#11'); // exact match
+    expect(match!.extras).toHaveLength(0); // exact match, no extras
     expect(match!.observedPcs).toEqual(expect.arrayContaining([0, 4, 6, 7]));
   });
 });

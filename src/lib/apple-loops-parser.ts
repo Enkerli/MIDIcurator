@@ -678,15 +678,18 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
   chord: DetectedChord | null;
   symbol: string;
 } {
-  // Empty interval mask or root-only (bit 0) = Logic Pro "No Chord" annotation.
+  // Empty mask, root-only [0], or any single-interval set = Logic Pro "No Chord" annotation.
   // These appear in files tagged as hasChords but with no actual chord at that position.
-  const isNoChord = event.intervals.length === 0
-    || (event.intervals.length === 1 && event.intervals[0] === 0);
-  if (isNoChord) {
+  if (event.intervals.length <= 1) {
     return { chord: null, symbol: 'NC' };
   }
 
   const quality = findQualityByIntervals(event.intervals);
+
+  // Unmatched 2-note dyads are also NC — insufficient for a named chord.
+  if (!quality && event.intervals.length === 2) {
+    return { chord: null, symbol: 'NC' };
+  }
 
   // If no root, return null chord with interval description
   if (!event.rootName || event.rootPc === undefined) {

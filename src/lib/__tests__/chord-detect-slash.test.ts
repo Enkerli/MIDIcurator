@@ -32,13 +32,15 @@ describe('detectChord — slash chords (inversions)', () => {
     expect(match!.symbol).toBe('C');
   });
 
-  it('non-chord-tone bass [F#3, C4, E4, G4] → no slash (F# not in C template)', () => {
-    // F#3 = MIDI 54, not a chord tone of C major
+  it('non-chord-tone bass [F#3, C4, E4, G4] → C(♯11)/F# (F# is ♯11 of add#11)', () => {
+    // F#3 = MIDI 54 — {C, E, F#, G} = [0,4,6,7] now matches add#11 exactly;
+    // F# is interval 6 (♯11), a chord tone → slash chord produced
     const match = detectChord([54, 60, 64, 67]);
     expect(match).not.toBeNull();
     expect(match!.root).toBe(0); // C
-    // F# is an extra, not a template tone — should NOT produce slash
-    expect(match!.bassPc).toBeUndefined();
+    expect(match!.quality.key).toBe('add#11'); // exact match
+    expect(match!.bassPc).toBe(6); // F# is ♯11 chord tone → slash
+    expect(match!.symbol).toContain('/F');
   });
 
   it('dominant 7th first inversion [E3, G3, Bb3, C4] → C7/E', () => {
