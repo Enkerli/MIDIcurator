@@ -233,16 +233,18 @@ export async function loadLoopDb(buffer: ArrayBuffer, fileName: string): Promise
         .replace(/,\s*a\.(jamPack|comment|copyright|fileURL)/g, '')
   );
 
-  // Primary query: .aif rows joined to their .caf sibling
+  // Primary query: .aif rows joined to their .caf sibling.
+  // Insert optional columns AFTER hasMidi (the last fixed column, position 14)
+  // so C_HASMIDI=14 remains accurate and optional cols land at 15–18 as expected.
   const queryAif = LOOP_DB_QUERY_BASE.replace(
-    /COALESCE\(c\.gbLoopType, a\.gbLoopType, 0\)/,
-    `COALESCE(c.gbLoopType, a.gbLoopType, 0),\n    ${aifOptionalExprs.join(',\n    ')}`
+    /COALESCE\(c\.hasMidi,\s+a\.hasMidi,\s+0\)/,
+    `COALESCE(c.hasMidi,   a.hasMidi,   0),\n    ${aifOptionalExprs.join(',\n    ')}`
   );
 
-  // Secondary query: .caf-only loops (no .aif counterpart)
+  // Secondary query: .caf-only loops (no .aif counterpart).
   const queryCaf = LOOP_DB_QUERY_CAF_BASE.replace(
-    /COALESCE\(c\.gbLoopType, 0\)/,
-    `COALESCE(c.gbLoopType, 0),\n    ${cafOptionalExprs.join(',\n    ')}`
+    /COALESCE\(c\.hasMidi,\s+0\)/,
+    `COALESCE(c.hasMidi,   0),\n    ${cafOptionalExprs.join(',\n    ')}`
   );
 
   const resultAif = db.exec(queryAif);

@@ -350,6 +350,14 @@ const CHORD_QUALITIES: ChordQuality[] = [
   { key: "maj9#5", fullName: "augmented ninth", displayName: "maj9#5", pcs: [0,4,8,11,2], binary: "101010001001", decimal: 2697, intervals: ["R","3","♯5","7","9"], aliases: ["maj9#5"] },
   { key: "M#5add9", fullName: "augmented added ninth", displayName: "M#5add9", pcs: [0,4,8,2], binary: "101010001000", decimal: 2696, intervals: ["R","3","♯5","9"], aliases: ["M#5add9"] },
   { key: "+add#9", fullName: "augmented added sharp ninth", displayName: "+add#9", pcs: [0,4,8,3], binary: "100110001000", decimal: 2440, intervals: ["R","3","♯5","♯9"], aliases: ["+add#9"] },
+  // ── Qualities identified from Apple Loop Sequ analysis ────────────────────
+  { key: "mb9",       fullName: "minor added flat ninth",               displayName: "m(♭9)",   pcs: [0,3,7,1],       binary: "110100010000", decimal: 3344, intervals: ["R","♭3","5","♭9"],              aliases: ["mb9","madd♭9","m(♭9)"] },
+  { key: "7Maj7add9", fullName: "dominant with major seventh add nine", displayName: "7(∆7,9)", pcs: [0,4,7,10,11,2], binary: "101010010011", decimal: 2707, intervals: ["R","3","5","♭7","∆7","9"],       aliases: ["7Maj7add9","7(maj7,9)","7(∆7,9)"] },
+  { key: "7b9add11",  fullName: "dominant flat ninth added eleventh",   displayName: "7(♭9,11)", pcs: [0,4,7,10,1,5], binary: "110011010010", decimal: 3282, intervals: ["R","3","5","♭7","♭9","11"],    aliases: ["7b9add11","7(♭9,11)"] },
+  { key: "6sus4",     fullName: "sixth suspended fourth",              displayName: "6sus4",    pcs: [0,5,7,9],       binary: "100001010100", decimal: 2132, intervals: ["R","4","5","6"],                aliases: ["6sus4"] },
+  { key: "dimadd9",   fullName: "diminished added ninth",              displayName: "°add9",    pcs: [0,3,6,2],       binary: "101100100000", decimal: 2848, intervals: ["R","♭3","♭5","9"],             aliases: ["dimadd9","dim(9)","°add9"] },
+  { key: "dim7add9",  fullName: "diminished seventh added ninth",      displayName: "°7(9)",    pcs: [0,3,6,9,2],     binary: "101100100100", decimal: 2852, intervals: ["R","♭3","♭5","𝄫7","9"],       aliases: ["dim7add9","dim7(9)","°7(9)"] },
+  { key: "m7add13",   fullName: "minor seventh added thirteenth",      displayName: "-7(13)",   pcs: [0,3,7,10,9],    binary: "100100010110", decimal: 2326, intervals: ["R","♭3","5","♭7","13"],         aliases: ["m7add13","m7(13)","-7(13)"] },
 ];
 
 // ─── Lookup index ──────────────────────────────────────────────────────

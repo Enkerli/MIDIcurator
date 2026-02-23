@@ -5,7 +5,7 @@
  * Based on reverse-engineering documented in docs/APPLE_LOOPS_REVERSE_ENGINEERING.md
  */
 
-import { findQualityByIntervals } from './chord-dictionary';
+import { findQualityByIntervals, spellRoot } from './chord-dictionary';
 import type { DetectedChord, Leadsheet, LeadsheetBar, LeadsheetChord } from '../types/clip';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -155,32 +155,32 @@ function decodeRootNote(
  * Encoding (fully reverse-engineered from LpTm* + 360 Blazing Clusters corpus):
  *
  *   Bytes at record offsets [0x18, 0x19, 0x1a]:
- *     b18 = fractional adjustment byte (negated: reduces tick below the integer)
+ *     b18 = fractional addition byte: adds b18/2 ticks (256 sub-units per 128-tick unit)
  *     b19 = low byte of integer position unit (u16LE with b1a)
  *     b1a = high byte of integer position unit
  *
  *   Formula (at 480ppq):
  *     main = b19 | (b1a << 8)          // u16LE from bytes 0x19 and 0x1a
- *     tick = (main - 0x96) * 128 - b18 * 8
+ *     tick = (main - 0x96) * 128 + (b18 >> 1)
  *
  *   Origin: main=0x96 → tick 0. Scale: 128 ticks per integer unit.
- *   Fractional: b18 * 8 ticks subtracted (b18=0x0f → −120 ticks = −0.25 beat).
+ *   Fractional: b18/2 ticks added (e.g. b18=0x80=128 → +64 ticks = +⅓ beat at 480ppq).
  *   At 480ppq, 1 bar (4/4) = 1920 ticks = 15 integer units.
  *
- *   The old formula read only bytes[0x18..0x19] as LE u16 (= b18 | (b19<<8))
- *   and applied `(u16 - 0x9600) * 128 >> 8`.  That works for loops < 16 bars
- *   (b1a=0) but silently overflows once b1a > 0 (beats ≥ 32 in 4/4).
+ *   Verified empirically across LpTm corpus and production Apple Loop files:
+ *   LpTmB1 record 1: b18=0x80, b19=0x9d, b1a=0 → tick=960 (beat 2.0) ✓
+ *   Waves of Nostalgia: b18=0x40, b19=0xa2, b1a=0 → tick=1440 (beat 3.0) ✓
+ *   8-Track Tape: b18=0xa7, b19=0x9d, b1a=0 → tick=980 (beat ~2.04) ✓
  *
- * @param b18  byte at record offset 0x18 (fractional, negated)
+ * @param b18  byte at record offset 0x18 (fractional addition: adds b18/2 ticks)
  * @param b19  byte at record offset 0x19 (low integer byte)
  * @param b1a  byte at record offset 0x1a (high integer byte)
  */
 function decodePositionTick(b18: number, b19: number, b1a: number): number {
   const main = b19 | (b1a << 8);
-  // Clamp to 0: large b18 values can produce negative ticks when the fractional
-  // subtraction (b18*8) exceeds the integer position contribution. This happens
-  // when b19 is close to the origin (0x96) but b18 is large (e.g. 0x84).
-  return Math.max(0, (main - 0x96) * 128 - b18 * 8);
+  // b18 is a fractional addition: b18/2 ticks added to the integer grid position.
+  // 256 sub-units per 128-tick unit → 0.5 ticks per sub-unit.
+  return Math.max(0, (main - 0x96) * 128 + (b18 >> 1));
 }
 
 /**
@@ -192,10 +192,10 @@ function decodePositionTick(b18: number, b19: number, b1a: number): number {
  *   +0x04: u16 LE mask (12-bit pitch-class bitmask)
  *   +0x08: u8 b8 (accidental / scheme marker)
  *   +0x09: u8 b9 (pitch class or accidental hint)
- *   +0x18: u8 b18 (fractional, negated: subtract b18*8 ticks)
+ *   +0x18: u8 b18 (fractional addition: adds b18/2 ticks)
  *   +0x19: u8 b19 (low byte of integer position unit)
  *   +0x1a: u8 b1a (high byte — needed for loops > ~16 bars at 4/4)
- *           tick = (b19|(b1a<<8) − 0x96) × 128 − b18 × 8  (at 480ppq)
+ *           tick = (b19|(b1a<<8) − 0x96) × 128 + b18/2  (at 480ppq)
  */
 function extractChordEventsFromSequ(
   data: Uint8Array,
@@ -678,6 +678,14 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
   chord: DetectedChord | null;
   symbol: string;
 } {
+  // Empty interval mask or root-only (bit 0) = Logic Pro "No Chord" annotation.
+  // These appear in files tagged as hasChords but with no actual chord at that position.
+  const isNoChord = event.intervals.length === 0
+    || (event.intervals.length === 1 && event.intervals[0] === 0);
+  if (isNoChord) {
+    return { chord: null, symbol: 'NC' };
+  }
+
   const quality = findQualityByIntervals(event.intervals);
 
   // If no root, return null chord with interval description
@@ -686,8 +694,7 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
     return { chord: null, symbol };
   }
 
-  // If we have root but no quality match (or empty/degenerate interval mask),
-  // show "Root?" rather than "Root[0,4,...]" or "Root[]"
+  // If we have root but no quality match, show "Root[intervals]" or "Root?" for degenerate cases
   if (!quality) {
     const symbol = event.intervals.length > 1
       ? `${event.rootName}[${event.intervals.join(',')}]`
@@ -727,14 +734,39 @@ export function appleLoopEventsToLeadsheet(
   events: AppleLoopChordEvent[],
   numBars: number,
   beatsPerBar: number = 4,
+  /**
+   * Target root pitch class (from loopMeta.rootPc) — the key the loop actually
+   * plays in.  Sequ chords are often stored in the loop's original MIDI key, which
+   * may differ from the playback key.  When provided, all chord roots are
+   * transposed by `(targetRootPc − firstSequ_rootPc) mod 12` semitones so that
+   * the first rooted chord aligns with the DB-tagged key.
+   */
+  targetRootPc?: number,
 ): Leadsheet | null {
   if (events.length === 0) return null;
+
+  // ── Root transposition ──────────────────────────────────────────────────────
+  // Compute semitone offset from first event that has a decoded root.
+  // offset = (DB key − Sequ first root) mod 12.  No-op when offset is 0.
+  let semitoneOffset = 0;
+  if (targetRootPc !== undefined) {
+    const firstRooted = events.find(e => e.rootPc !== undefined);
+    if (firstRooted?.rootPc !== undefined) {
+      semitoneOffset = (targetRootPc - firstRooted.rootPc + 12) % 12;
+    }
+  }
+  // Build a working copy with transposed roots (only if offset is non-zero).
+  const workEvents: AppleLoopChordEvent[] = semitoneOffset === 0 ? events : events.map(e => {
+    if (e.rootPc === undefined) return e;
+    const pc = (e.rootPc + semitoneOffset) % 12;
+    return { ...e, rootPc: pc, rootName: spellRoot(pc, targetRootPc) };
+  });
 
   // Group events by bar using their decoded positionBeats.
   // Events are sorted by positionBeats (guaranteed by extractChordEventsFromSequ).
   // positionBeats is the absolute beat position across the whole loop (0-indexed).
   const barGroups = new Map<number, AppleLoopChordEvent[]>();
-  for (const event of events) {
+  for (const event of workEvents) {
     const barIdx = Math.floor(event.positionBeats / beatsPerBar);
     const clampedBar = Math.max(0, Math.min(numBars - 1, barIdx));
     if (!barGroups.has(clampedBar)) barGroups.set(clampedBar, []);

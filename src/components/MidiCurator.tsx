@@ -369,11 +369,17 @@ export function MidiCurator() {
             extraNotes += ` | Chords: ${formatChordTimeline(chordEvents)}`;
           }
 
-          // Convert chord events to leadsheet structure
-          const leadsheet = appleLoopEventsToLeadsheet(chordEvents, numBars, result.beatsPerBar);
-
-
+          // Fetch DB metadata first — needed for root transposition.
           const loopMeta = lookupLoopMeta(file.name);
+
+          // Convert chord events to leadsheet structure.
+          // Pass loopMeta.rootPc so that chord roots are transposed from the loop's
+          // original Sequ key to the DB-tagged playback key.
+          const leadsheet = appleLoopEventsToLeadsheet(
+            chordEvents, numBars, result.beatsPerBar,
+            loopMeta?.rootPc !== undefined && loopMeta.rootPc >= 0 ? loopMeta.rootPc : undefined,
+          );
+
           await importMidiBuffer(result.midi, midiFilename, ['apple-loop'], extraNotes, leadsheet, loopMeta);
           continue;
         }
@@ -856,11 +862,18 @@ export function MidiCurator() {
           });
         }
         if (q === 'chord') {
-          // Clips with at least one bar whose chord symbol contains '?' or '[' (unrecognised quality)
+          // Clips with at least one unrecognised chord quality (symbol contains '?' or '[').
+          // We check two places:
+          //   1. barChords: for clips whose chord was detected from MIDI notes (chord non-null).
+          //   2. leadsheet inputText: for Apple Loop clips whose chord is null (no quality match)
+          //      but whose inputText carries the bracket/question notation.
+          const hasUnknownSym = (sym: string) => sym.includes('?') || sym.includes('[');
           return clips.filter(c => {
             const chords = getEffectiveBarChords(c);
-            if (!chords) return false;
-            return chords.some(b => b.chord && (b.chord.symbol.includes('?') || b.chord.symbol.includes('[')));
+            if (chords?.some(b => b.chord && hasUnknownSym(b.chord.symbol))) return true;
+            return c.leadsheet?.bars.some(bar =>
+              bar.chords.some(lc => !lc.chord && hasUnknownSym(lc.inputText ?? ''))
+            ) ?? false;
           });
         }
         if (q === 'flagged') {

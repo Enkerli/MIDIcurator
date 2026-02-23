@@ -1,23 +1,23 @@
-# Apple Loops (AIFF/C AF) reverse‑engineering notes (work in progress)
+# Apple Loops (AIFF/CAF) reverse‑engineering notes
 
-This document summarizes what we currently know (and what is still uncertain) about **Apple Loops musical metadata**
-embedded in loop audio files, with a focus on **chord sequences**.
+This document summarizes what we know about **Apple Loops musical metadata**
+embedded in loop audio files, focusing on **chord sequences** in the `Sequ` chunk.
 
-It’s written for other reverse‑engineers: enough structure to reproduce results, with clear “known vs inferred”.
+Written for other reverse‑engineers: enough structure to reproduce results, with clear "known vs inferred/uncertain".
 
 ---
 
 ## Scope
 
 - Containers:
-  - **AIFF/AIFC** (`.aif`, `.aiff`) for user‑generated loops and some exports
-  - **CAF** (`.caf`) for many first‑party Apple Loops
+  - **AIFF/AIFC** (`.aif`, `.aiff`) for user‑generated loops and GarageBand exports
+  - **CAF** (`.caf`) for first‑party Apple Loops — typically **no Sequ/chord data**
 - Embedded musical metadata:
-  - Embedded **SMF MIDI** (when present)
-  - **Chord timeline** (the `Sequ` payload and “chord events” of type `103`)
-- Out of scope (for now):
+  - Embedded **SMF MIDI** (when present — `.aif` exports from GarageBand)
+  - **Chord timeline** (the `Sequ` payload and "chord events" of type `103`)
+- Out of scope:
   - Pattern loops / Session Player loops (different formats/encodings)
-  - Full reconstruction of Apple’s v11 loop database schema (covered elsewhere)
+  - Full Logic loop database schema (covered in loop-database.ts)
 
 ---
 
@@ -40,150 +40,202 @@ Apple Loops metadata appears in one or more `APPL` chunks.
 
 ### 1.2 Apple Loops metadata is nested inside `APPL`
 
-Inside `APPL` chunk payloads we observe a **second IFF‑like subchunk layer**:
+Inside `APPL` chunk payloads there is a second IFF‑like subchunk layer:
 
 - `subchunk_id` (4 bytes ASCII)
 - `subchunk_size` (u32 big‑endian)
 - `subchunk_data`
 - Optional pad byte
 
-Among these, a `Sequ` subchunk has been empirically linked to chord sequences.
+Among these, a `Sequ` subchunk contains chord sequences.
 
-> **Practical takeaway:** You can parse the AIFF’s top‑level chunks, then recursively parse IFF‑style subchunks inside
-> each `APPL` payload, and look for `Sequ`.
+> **Practical takeaway:** Parse top‑level AIFF chunks, recursively parse IFF‑style
+> subchunks inside each `APPL` payload, and look for `Sequ`.
 
 ---
 
 ## 2) The `Sequ` payload and chord events
 
-### 2.1 “Chord events” are found by scanning for event type `103`
+### 2.1 "Chord events" are found by scanning for event type `103`
 
-A `Sequ` payload appears to contain a stream of fixed‑size “events”.
-Rather than fully decoding the (still‑unknown) surrounding structure, we reliably locate chord events by scanning the
-payload for records where:
+A `Sequ` payload contains a stream of fixed‑size 32-byte "events".
+We locate chord events by scanning the payload **at every 2-byte boundary** for records where:
 
-- `type == 103` (u16 big‑endian at offset `+0x00` of the event record)
+- bytes at `+0x00..+0x01` read as u16‑LE equal `103` (0x67 0x00)
 
-This scanning approach is robust enough for validation and extraction.
+This scan approach is robust enough for reliable extraction.
 
-### 2.2 Event record layout (30 bytes)
+### 2.2 Event record layout (32 bytes)
 
-For an event starting at some offset `off` within `Sequ` payload, the fields are:
+For an event starting at offset `off` within the `Sequ` payload:
 
-| Field | Offset | Size | Type | Notes |
-|---|---:|---:|---|---|
-| `type` | `+0x00` | 2 | u16 BE | chord events use `103` |
-| `w1` | `+0x02` | 2 | u16 BE | unknown |
-| `mask` | `+0x04` | 2 | u16 BE | pitch‑class bitmask (12 bits) |
-| `w3` | `+0x06` | 2 | u16 BE | unknown (often `0x0f07`) |
-| `b8` | `+0x08` | 1 | u8 | unknown (varies) |
-| `b9` | `+0x09` | 1 | u8 | unknown (varies) |
-| `x10` | `+0x0a` | 2 | u16 BE | unknown (often `0xb200`) |
-| `x12` | `+0x0c` | 2 | u16 BE | unknown (often `0x0000`) |
-| `be14` | `+0x0e` | 4 | u32 BE | unknown; stable around `0x000080xx` in many files |
-| `be18` | `+0x12` | 4 | u32 BE | unknown; large values; likely a time/value in fixed‑point |
-| `be22` | `+0x16` | 4 | u32 BE | **time‑within‑bar encoding** (see below) |
-| `be26` | `+0x1a` | 4 | u32 BE | unknown; often `0` but not always |
+| Field   | Offset | Size | Notes |
+|---------|-------:|-----:|-------|
+| `type`  | `+0x00` | 2 | u16 LE — chord events = 103 |
+| (pad)   | `+0x02` | 2 | unknown |
+| `mask`  | `+0x04` | 2 | u16 LE — 12-bit pitch-class interval bitmask |
+| (pad)   | `+0x06` | 2 | unknown (often `0x0f07`) |
+| `b8`    | `+0x08` | 1 | accidental scheme (1=flat, 2=natural, 3=sharp) |
+| `b9`    | `+0x09` | 1 | pitch class mod 12 (absolute chromatic position) |
+| (pad)   | `+0x0a` | 14 | unknown fields |
+| `b18`   | `+0x18` | 1 | fractional tick addition: adds `b18/2` ticks |
+| `b19`   | `+0x19` | 1 | low byte of integer position unit (u16LE with b1a) |
+| `b1a`   | `+0x1a` | 1 | high byte of integer position unit |
+| (pad)   | `+0x1b` | 5 | unknown |
 
-**Total:** 30 bytes.
+**Total: 32 bytes.**
 
-### 2.3 `mask` → chord pitch‑class intervals
+### 2.3 `mask` + `b8`/`b9` → chord identity
 
-`mask` is interpreted as a 12‑bit set over semitones above an implicit root:
+#### From the bitmask to intervals
 
-- bit 0 → interval 0 (root)
-- bit 1 → interval 1 (♭2)
-- …
-- bit 11 → interval 11 (maj7)
+`mask` is a 12-bit integer where **each bit position represents one semitone step above the chord root**:
 
-Example:
+```
+bit 0  = root (unison, 0 semitones above root)
+bit 1  = minor 2nd / ♭9 (1 semitone)
+bit 2  = major 2nd / 9 (2 semitones)
+bit 3  = minor 3rd (3 semitones)
+bit 4  = major 3rd (4 semitones)
+bit 5  = perfect 4th / 11 (5 semitones)
+bit 6  = tritone / ♯11 (6 semitones)
+bit 7  = perfect 5th (7 semitones)
+bit 8  = minor 6th / ♭13 (8 semitones)
+bit 9  = major 6th / 13 (9 semitones)
+bit 10 = minor 7th / ♭7 (10 semitones)
+bit 11 = major 7th (11 semitones)
+```
 
-- `mask = 0b100010010001` → intervals `[0, 4, 7, 11]` → a maj7 “shape” (root unspecified)
+To extract the interval list: iterate bits 0–11, collect every position where the bit is `1`.
 
-This yields a **pitch‑class set relative to the chord root**, but **does not directly reveal the absolute root pitch
-class** (that likely lives elsewhere, or is implied by other metadata we haven’t pinned down yet).
+**Example:** `mask = 0x891` = binary `100010010001`
+→ bits 0, 4, 7, 11 are set → intervals `[0, 4, 7, 11]` → root, major 3rd, perfect 5th, major 7th.
 
-### 2.4 `be22` → event position within the bar (empirical)
+**Special cases:**
+- `mask = 0` (no bits set) → "No Chord" event — Logic Pro's explicit "NC" annotation.
+- `mask = 1` (only bit 0) → root only — also treated as "No Chord" (a root alone is not a chord).
 
-`be22` behaves like a **16.16 fixed‑point** value whose low 16 bits provide a usable normalized number:
+#### From intervals to chord name
 
-- `norm = (be22 & 0xFFFFFFFF) / 65536.0`
+The interval list `[0, 4, 7, 11]` describes a **chord quality** — the internal structure of the chord independent of which note is the root. In music theory this is sometimes called a "pitch-class set" (pc-set), though here the set is always relative to a root at 0 rather than an absolute pitch.
 
-Empirically, a good mapping from `norm` to **event time (in beats within a bar)** is:
+To name the chord:
+1. Look up the interval set against a dictionary of known chord templates.
+   - `[0, 4, 7]` → major triad
+   - `[0, 3, 7]` → minor triad
+   - `[0, 4, 7, 10]` → dominant 7th
+   - `[0, 4, 7, 11]` → major 7th (∆7)
+   - …and so on (MIDIcurator has 127 templates covering jazz, classical, modal, and
+     extended harmony).
+2. Combine the quality name with the root from `b8`/`b9`:
+   - root `E♭` + quality `∆7` → **E♭∆7**
+   - root `F♯` + quality `m7` → **F♯m7**
 
-- `pos_beats = (1.0 - norm) * beats_per_bar`
-- `pos_beats = pos_beats % beats_per_bar` (wrap, so near‑end values represent ~0)
+If no template matches, the interval set is shown literally in brackets (e.g. `A[0,2,3,6]`),
+making it easy to cross-reference against a DAW's chord label.
 
-This matches observed edits:
+`b8` and `b9` encode the **absolute chord root**:
 
-- a chord at bar start often yields `pos_beats ≈ beats_per_bar - ε`, which wraps to ~0
-- a chord change at “beat 3.25” in 4/4 (1‑based beat count) corresponds to ~`pos_beats ≈ 2.25` (0‑based)
+| `b8` value | meaning |
+|:----------:|---------|
+| 1 | flat accidental (`b9` mod 12 = root PC, spelled with ♭) |
+| 2 | natural (no accidental) |
+| 3 | sharp accidental (`b9` mod 12 = root PC, spelled with ♯) |
 
-**Precision:** because `norm` is quantized by 16‑bit fractional steps, expect tiny rounding errors (often ~0.01 beats).
+So `b8=1, b9=10` → B♭ (PC 10, flat spelling); `b8=3, b9=6` → F♯ (PC 6, sharp spelling).
+
+> **Note:** All test files in the MIDIcurator corpus use scheme 1 (b8 ∈ {1,2,3}).
+> Older documentation claimed a "scheme 2" (b8=0x0f) for some files — this was incorrect
+> and no such files were found in empirical testing.
+
+### 2.4 `b18`/`b19`/`b1a` → event absolute tick position
+
+The three bytes at record offsets `0x18`, `0x19`, `0x1a` encode the event's **absolute tick position**
+within the MIDI timeline (at 480 ticks per beat / PPQ):
+
+```
+main = b19 | (b1a << 8)          // u16 LE integer position unit
+tick = (main − 0x96) × 128 + (b18 >> 1)
+```
+
+- **Origin:** `main = 0x96` → tick 0 (loop start).
+- **Scale:** 128 ticks per integer unit at 480 PPQ → 1 bar (4/4) = 1920 ticks = 15 units.
+- **Fractional:** `b18 / 2` ticks added for sub-integer precision.
+  - `b18 = 0x00` → whole-unit boundary (beat boundary).
+  - `b18 = 0x80` → +64 ticks → ⅓ beat (480/3 = 160 ticks? no — 64 ticks = 1/7.5 beat ≈ 0.13 beat).
+- **Overflow:** `b1a` handles loops longer than ~31 beats (`main > 0x96 + 255` requires `b1a > 0`).
+
+**Empirical verification:**
+
+| File | b18 | b19 | b1a | Computed tick | MIDI note onset | Match? |
+|------|-----|-----|-----|:-------------:|:---------------:|:------:|
+| LpTmB1 record 1 | 0x80 | 0x9d | 0x00 | 960 | 960 (beat 2.0) | ✓ |
+| Waves of Nostalgia (chord 1) | 0x40 | 0xa2 | 0x00 | 1440 | 1440 (beat 3.0) | ✓ |
+| Waves of Nostalgia (chord 2) | 0xc0 | 0xb1 | 0x00 | 6240 | 6240 (beat 13.0) | ✓ |
+| 8-Track Tape EP | 0xa7 | 0x9d | 0x00 | 980 | ~980 (beat ~2.04) | ✓ |
+
+> **Historical note:** An earlier formula used `(main − 0x96) × 128 − b18 × 8`
+> (b18 subtracted, scaled by 8). This produced negative values for many real-world
+> files (e.g. b18=0x80 → −1024 → clamped to 0), causing all events to pile up at
+> beat 0. The correct formula was determined by cross-referencing decoded positions
+> with MIDI note group onsets in the embedded SMF data.
 
 ---
 
-## 3) What we can extract today (reliably)
+## 3) What we can extract reliably
 
-From a compatible `.aif` we can reliably extract:
+From a compatible `.aif` (user-generated Apple Loop with `Sequ`):
 
 - One or more `Sequ` payloads (nested inside `APPL`)
 - A list of chord events (`type=103`)
 - For each event:
-  - `mask` → interval set (pitch‑class set relative to root)
-  - `be22` → event position within bar (given `beats_per_bar`)
-  - Additional unknown fields (`b8`, `b9`, `be14`, `be18`, etc.) that may become useful later
+  - `mask` → interval set (pitch-class set relative to root)
+  - `b8`/`b9` → absolute chord root + accidental spelling
+  - `b18`/`b19`/`b1a` → absolute tick position within the MIDI timeline
+  - Combined: full chord symbol with timing
 
-This is enough to print a usable **chord timeline** for validation and for downstream tooling.
-
----
-
-## 4) Open questions / unknowns (explicit)
-
-- How to derive **absolute chord roots** (not just interval sets):
-  - do `b8`/`b9` encode root? (not yet proven)
-  - is root stored elsewhere in `Sequ` or other subchunks?
-- What do `be14`, `be18`, and `be26` represent?
-  - timebase? tempo? absolute ticks? bar/region offsets?
-- How to interpret multiple `Sequ` payloads in one file:
-  - layers? regions? alternatives? multiple chord tracks?
+This is sufficient to build a complete **leadsheet** from Apple Loop files.
 
 ---
 
-## 5) Reference implementation approach (recommended)
+## 4) Open questions / unknowns
 
-A practical extractor can:
-
-1. Parse top‑level AIFF chunks; collect `APPL` payloads
-2. Parse nested IFF‑style subchunks inside each `APPL` payload
-3. Collect `Sequ` subchunk payloads
-4. Scan each `Sequ` payload for 30‑byte records whose `type==103`
-5. For each event:
-   - decode `mask` → intervals
-   - decode `be22` → position within bar (with configurable `beats_per_bar`)
-6. Sort events by position and print the timeline
-
-A single‑file Python script implementing this exists alongside this document.
+- Unknown bytes at `+0x0a`–`+0x17` (14 bytes): purpose not established.
+  - `+0x0e` (4 bytes BE): stable around `0x000080xx` in many files.
+  - `+0x12` (4 bytes BE): larger values; possibly a secondary timing/duration field.
+- Multiple `Sequ` payloads in one file: are they separate tracks, layers, or redundant?
+- `.caf` files: first-party Apple Loops have no `Sequ` data (chord annotations only appear
+  after round-tripping through GarageBand → loop export → `.aif`).
+- Duration of each chord event: not currently decoded. We infer duration from the
+  next event's position (or end of loop).
 
 ---
 
-## 6) Planned roadmap (context)
+## 5) Reference implementation
 
-The immediate next steps (beyond this doc) typically look like:
+A practical extractor:
 
-1. Print chord sequence from compatible `.aif` (user‑generated) ✅
-2. Do the same for `.caf` (first‑party loops)
-3. Index all Apple Loops with chord metadata (`hasChords`)
-4. Rebuild a loop database including chord info
-5. Extract embedded `.mid` SMF and rename based on loop filename
-6. Embed global metadata into extracted MIDI files (MIDIcurator scheme)
-7. Embed chord metadata into MIDI at correct positions
-8. Run at scale across the whole loop library
-9. Document the full project end‑to‑end
+1. Parse top‑level AIFF chunks; collect `APPL` payloads.
+2. Parse nested IFF‑style subchunks inside each `APPL` payload.
+3. Collect `Sequ` subchunk payloads.
+4. Scan each `Sequ` payload at every 2-byte boundary for records where `u16 LE at +0x00 == 103`.
+5. For each record:
+   - Decode `mask` → intervals.
+   - Decode `b8`/`b9` → root pitch class + accidental.
+   - Compute `tick = (b19|(b1a<<8) − 0x96) × 128 + (b18 >> 1)`.
+6. Sort by tick and match to MIDI note groups for validation.
+
+**Diagnostic tool:** `scripts/dump-sequ.py` — dumps all type-103 records from a `.aif`
+alongside MIDI note groups for cross-referencing.
+
+**Production implementation:** `src/lib/apple-loops-parser.ts` —
+`extractChordEventsFromSequ()` and `appleLoopEventsToLeadsheet()`.
 
 ---
 
 ## License / attribution
 
-This is reverse‑engineering documentation produced from empirical tests and does not contain Apple proprietary code.
-If you publish derivatives, keep the “known vs inferred” separation clear to avoid propagating incorrect assumptions.
+This is reverse‑engineering documentation produced from empirical tests on files generated
+by GarageBand and Logic Pro. It does not contain Apple proprietary code.
+If you publish derivatives, keep the "known vs inferred" separation clear to avoid
+propagating incorrect assumptions.

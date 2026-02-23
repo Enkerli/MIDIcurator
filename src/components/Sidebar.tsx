@@ -56,22 +56,81 @@ export function Sidebar({
   const loopDbInputRef = { current: null as HTMLInputElement | null };
   const [unknownOpen, setUnknownOpen] = useState(false);
 
-  /** Map of unrecognized chord symbol → set of filenames it appears in (across allClips). */
-  const unknownChords = useMemo(() => {
-    const map = new Map<string, Set<string>>();
+  /**
+   * Collect unrecognized chord symbols from allClips.
+   * Returns two views:
+   *   bySymbol: symbol → set of filenames (for the panel display, sorted by frequency)
+   *   byClip:   filename → sorted list of bar+symbol pairs (for export)
+   */
+  const unknownChordData = useMemo(() => {
+    const hasUnknown = (sym: string) => sym.includes('?') || sym.includes('[');
+    const bySymbol = new Map<string, Set<string>>();
+    const byClip = new Map<string, Array<{ bar: number; symbol: string }>>();
+
     for (const clip of allClips) {
+      const seen = new Set<string>(); // deduplicate bar+sym within a clip
+
+      // Check leadsheet inputText — covers Apple Loop null-chord unknowns
+      if (clip.leadsheet) {
+        for (const bar of clip.leadsheet.bars) {
+          for (const lc of bar.chords) {
+            // Use the chord symbol if matched, otherwise fall back to inputText
+            const sym = lc.chord ? lc.chord.symbol : (lc.inputText ?? '');
+            if (!sym || !hasUnknown(sym)) continue;
+            const key = `${bar.bar}:${sym}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (!bySymbol.has(sym)) bySymbol.set(sym, new Set());
+            bySymbol.get(sym)!.add(clip.filename);
+            if (!byClip.has(clip.filename)) byClip.set(clip.filename, []);
+            byClip.get(clip.filename)!.push({ bar: bar.bar, symbol: sym });
+          }
+        }
+      }
+
+      // Check barChords — covers MIDI-detected unknowns (chord is non-null)
       const bars = getEffectiveBarChords(clip) ?? [];
       for (const b of bars) {
         const sym = b.chord?.symbol ?? '';
-        if (sym && (sym.includes('?') || sym.includes('['))) {
-          if (!map.has(sym)) map.set(sym, new Set());
-          map.get(sym)!.add(clip.filename);
-        }
+        if (!sym || !hasUnknown(sym)) continue;
+        const key = `${b.bar}:${sym}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!bySymbol.has(sym)) bySymbol.set(sym, new Set());
+        bySymbol.get(sym)!.add(clip.filename);
+        if (!byClip.has(clip.filename)) byClip.set(clip.filename, []);
+        byClip.get(clip.filename)!.push({ bar: b.bar, symbol: sym });
       }
     }
-    // Sort by frequency descending
-    return [...map.entries()].sort((a, b) => b[1].size - a[1].size);
+
+    return {
+      bySymbol: [...bySymbol.entries()].sort((a, b) => b[1].size - a[1].size),
+      byClip: [...byClip.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+    };
   }, [allClips]);
+
+  const unknownChords = unknownChordData.bySymbol;
+
+  function handleExportUnknownChords() {
+    const lines: string[] = ['Unknown Chords Report', '='.repeat(60), ''];
+    for (const [filename, entries] of unknownChordData.byClip) {
+      const name = filename.replace(/\.mid$/i, '');
+      lines.push(`Clip: ${name}`);
+      // Sort by bar index, then deduplicate same bar+sym
+      const sorted = [...entries].sort((a, b) => a.bar - b.bar);
+      for (const { bar, symbol } of sorted) {
+        lines.push(`  Bar ${bar + 1}: ${symbol}`);
+      }
+      lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'unknown-chords.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const flaggedCount = useMemo(() => allClips.filter(c => c.flagged).length, [allClips]);
 
@@ -196,14 +255,23 @@ export function Sidebar({
       {/* Unknown chords panel */}
       {unknownChords.length > 0 && (
         <div className="mc-unknown-chords">
-          <button
-            className="mc-unknown-chords-toggle"
-            onClick={() => setUnknownOpen(o => !o)}
-            aria-expanded={unknownOpen}
-          >
-            <span>{unknownOpen ? '▾' : '▸'}</span>
-            {' '}{unknownChords.length} unknown chord{unknownChords.length !== 1 ? 's' : ''}
-          </button>
+          <div className="mc-unknown-chords-header">
+            <button
+              className="mc-unknown-chords-toggle"
+              onClick={() => setUnknownOpen(o => !o)}
+              aria-expanded={unknownOpen}
+            >
+              <span>{unknownOpen ? '▾' : '▸'}</span>
+              {' '}{unknownChords.length} unknown chord{unknownChords.length !== 1 ? 's' : ''}
+            </button>
+            <button
+              className="mc-btn--export-unknown"
+              title="Download a text listing of all clips with unknown chords"
+              onClick={handleExportUnknownChords}
+            >
+              ⬇ Export
+            </button>
+          </div>
           {unknownOpen && (
             <ul className="mc-unknown-chords-list">
               {unknownChords.map(([sym, files]) => (

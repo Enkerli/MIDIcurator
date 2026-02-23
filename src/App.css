@@ -704,10 +704,16 @@ body {
   overflow: hidden;
 }
 
-.mc-unknown-chords-toggle {
-  width: 100%;
-  text-align: left;
+.mc-unknown-chords-header {
+  display: flex;
+  align-items: stretch;
   background: var(--mc-bg-card);
+}
+
+.mc-unknown-chords-toggle {
+  flex: 1;
+  text-align: left;
+  background: transparent;
   border: none;
   padding: 5px 8px;
   font-size: 11px;
@@ -716,6 +722,21 @@ body {
 }
 
 .mc-unknown-chords-toggle:hover {
+  color: var(--mc-text);
+}
+
+.mc-btn--export-unknown {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--mc-border);
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--mc-text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mc-btn--export-unknown:hover {
   color: var(--mc-text);
 }
 
