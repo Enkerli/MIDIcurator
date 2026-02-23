@@ -20,6 +20,18 @@ Written for other reverse‑engineers: enough structure to reproduce results, wi
   - Full Logic loop database schema (covered in loop-database.ts)
 
 ---
+## 0) What’s the point?
+1. There’s no obligation for anyone to get what the point is. It won’t be on the exam. Feel free to move along.
+2. My interest in chord-aware MIDI clips comes from a bigger portion of this MIDI pattern curation project.
+3. The extraction isn’t just meant for first-party Apple Loops. It applies to any MIDI content added to the Loop Library. {waits for realization to kick in… /}
+4. Some first-party Apple Loops do carry rich harmonic information, especially when you pay attention to harmonic rhythm, automated voice-leading, use of shell chords, “comping tricks”, and the diversity of chord spellings.
+5. Though proprietary and copyrighted, first-party Apple Loops are shared assets, available for free to a large number of users including many classrooms at diverse levels. Even harmonically-simple ones can lead to valuable learning experiences. There’s research value in their use in the musical development of people from diverse backgrounds.
+6. Using metadata embedded in Apple Loops (custom or first-party) is an efficient way to kickstart a database curation process.
+7. High-quality datasets help build and test a variety of tools. For instance, this process has already helped me augment my chord dictionary.
+8. Chords retrieved may not necessarily be heard in their realization. For instance, you can’t actually hear a chord progression in a monophonic lead line. Trying to guess what the “implied harmonic structure” might be is quite different from getting the intended structure from the source (including cases where the user is the source of both the harmonic structure and the melodic line). After all, [the same melody can fit a variety of harmonic contexts](https://www.ethanhein.com/wp/2026/twelve-remixes-of-dreams-by-fleetwood-mac/).
+9. While the process currently focuses on chords which were identified in the MIDI content, it also works for any “leadsheet”, including those created through LP12’s ChordID (which often need to be tweaked).
+10. There aren’t common ways to share chord information in MIDI format, even though it’s easy and potentially convenient to do so.
+11. It’s notoriously difficult to even just copy the chord information present in Logic Pro.
 
 ## 1) High‑level structure
 
