@@ -686,8 +686,21 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
 
   const quality = findQualityByIntervals(event.intervals);
 
-  // Unmatched 2-note dyads are also NC — insufficient for a named chord.
-  if (!quality && event.intervals.length === 2) {
+  // Unmatched or rootless dyads → NC.
+  if (event.intervals.length === 2 &&
+      (!quality || !event.rootName || event.rootPc === undefined)) {
+    return { chord: null, symbol: 'NC' };
+  }
+
+  // Chromatic / oversized clusters (> 7 distinct intervals) → NC.
+  // These appear in audio/drone loops and carry no harmonic meaning.
+  if (event.intervals.length > 7) {
+    return { chord: null, symbol: 'NC' };
+  }
+
+  // Rootless small clusters (≤ 3 intervals) → NC regardless of quality match.
+  // Without a root, a 2- or 3-note set is too ambiguous to name (e.g. ?b5, [5,6,7]).
+  if ((!event.rootName || event.rootPc === undefined) && event.intervals.length <= 3) {
     return { chord: null, symbol: 'NC' };
   }
 
