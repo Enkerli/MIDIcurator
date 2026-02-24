@@ -684,6 +684,13 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
     return { chord: null, symbol: 'NC' };
   }
 
+  // Intervals without bit 0 (root) set — spurious preamble records found in some
+  // Apple Loops (e.g. Snow Blind Sweeps 01/02).  The root pitch class is encoded in
+  // b8/b9 but is NOT reflected in the bitmask, so quality lookup always fails.
+  if (!event.intervals.includes(0)) {
+    return { chord: null, symbol: 'NC' };
+  }
+
   const quality = findQualityByIntervals(event.intervals);
 
   // Unmatched or rootless dyads → NC.
@@ -807,28 +814,49 @@ export function appleLoopEventsToLeadsheet(
     // all bars (not just within this bar), so chords span bar boundaries naturally.
     const barEnd = (barIdx + 1) * beatsPerBar;
 
-    const rawChords: LeadsheetChord[] = barEvents.map((event, position) => {
-      const { chord, symbol } = appleLoopEventToDetectedChord(event);
+    // Decode all events for this bar, clamping beat positions to ≥ 0.
+    // Clamp to 0: the position formula can yield small negative ticks when b18 is
+    // large relative to b19 (e.g. Unsure Paths 02 record 0 decodes to beat -1.4
+    // due to a large fractional subtraction byte). Treat those as bar start.
+    const decoded = barEvents.map(e => {
+      const { chord, symbol } = appleLoopEventToDetectedChord(e);
+      const beatPosition = Math.max(0, e.positionBeats - barIdx * beatsPerBar);
+      return { chord, symbol, beatPosition };
+    });
 
-      // beatPosition within the bar (0 = bar start).
-      // Clamp to 0: the position formula can yield small negative ticks when b18 is
-      // large relative to b19 (e.g. Unsure Paths 02 record 0 decodes to beat -1.4
-      // due to a large fractional subtraction byte). Treat those as bar start.
-      const beatPosition = Math.max(0, event.positionBeats - barIdx * beatsPerBar);
+    // Filter out pure NC annotations (chord resonance principle: a chord remains
+    // valid until the next real chord change, even when NC records are present).
+    const harmonic = decoded.filter(d => !(d.chord === null && d.symbol === 'NC'));
 
-      // Duration = distance to next chord in this bar, or fill to bar end.
-      const nextEvent = barEvents[position + 1];
-      const nextBeat = nextEvent
-        ? Math.max(beatPosition, nextEvent.positionBeats - barIdx * beatsPerBar)
+    if (harmonic.length === 0) {
+      // Every event in this bar decoded to NC — extend the previous chord.
+      if (lastChord) {
+        const carried: LeadsheetChord = {
+          ...lastChord,
+          position: 0,
+          totalInBar: 1,
+          beatPosition: 0,
+          duration: beatsPerBar,
+        };
+        bars.push({ bar: barIdx, chords: [carried], isRepeat: false });
+      }
+      continue;
+    }
+
+    const rawChords: LeadsheetChord[] = harmonic.map((d, position) => {
+      // Duration = distance to next harmonic chord in this bar, or fill to bar end.
+      const next = harmonic[position + 1];
+      const nextBeat = next
+        ? Math.max(d.beatPosition, next.beatPosition)
         : barEnd - barIdx * beatsPerBar;
-      const duration = Math.max(0, nextBeat - beatPosition);
+      const duration = Math.max(0, nextBeat - d.beatPosition);
 
       return {
-        chord,
-        inputText: symbol,
+        chord: d.chord,
+        inputText: d.symbol,
         position,
-        totalInBar: barEvents.length,
-        beatPosition,
+        totalInBar: harmonic.length,
+        beatPosition: d.beatPosition,
         duration,
       };
     });

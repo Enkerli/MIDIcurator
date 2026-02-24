@@ -395,6 +395,9 @@ const CHORD_QUALITIES: ChordQuality[] = [
   { key: "sus2b13",     fullName: "suspended second flat thirteenth",                          displayName: "(♭13)sus2",   pcs: [0,2,7,8],       binary: "101000011000", decimal: 2584, intervals: ["R","9","5","♭13"],                   aliases: ["sus2b13","(♭13)sus2"] },
   { key: "mAdd9#11",    fullName: "minor added ninth sharp eleventh",                          displayName: "m(9,♯11)",    pcs: [0,2,3,6,7],     binary: "101100110000", decimal: 2864, intervals: ["R","9","♭3","♯11","5"],              aliases: ["mAdd9#11","m(9,♯11)"] },
   { key: "5b9b13",      fullName: "power chord flat ninth flat thirteenth",                    displayName: "5(♭9,♭13)",   pcs: [0,1,7,8],       binary: "110000011000", decimal: 3096, intervals: ["R","♭9","5","♭13"],                  aliases: ["5b9b13","5(♭9,♭13)"] },
+  // ── Qualities identified from Apple Loop Sequ analysis (batch 6) ─────────
+  { key: "7b9#5no3",    fullName: "dominant seventh flat ninth sharp fifth no third",          displayName: "(7,♭9,♯5)",   pcs: [0,1,8,10],      binary: "110000001010", decimal: 3082, intervals: ["R","♭9","♯5","♭7"],                  aliases: ["7b9#5no3","5(7,♭9,♯5)"] },
+  { key: "6#9",         fullName: "major sixth sharp ninth",                                   displayName: "6(♯9)",       pcs: [0,3,4,7,9],     binary: "100110010100", decimal: 2452, intervals: ["R","♯9","3","5","6"],                  aliases: ["6#9","6(♯9)"] },
 ];
 
 // ─── Lookup index ──────────────────────────────────────────────────────
