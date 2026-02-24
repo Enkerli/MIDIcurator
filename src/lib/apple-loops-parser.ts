@@ -698,24 +698,14 @@ export function appleLoopEventToDetectedChord(event: AppleLoopChordEvent): {
     return { chord: null, symbol: 'NC' };
   }
 
-  // Rootless small clusters (≤ 3 intervals) → NC regardless of quality match.
-  // Without a root, a 2- or 3-note set is too ambiguous to name (e.g. ?b5, [5,6,7]).
-  if ((!event.rootName || event.rootPc === undefined) && event.intervals.length <= 3) {
+  // All rootless events → NC; without a root a chord annotation is unplayable.
+  if (!event.rootName || event.rootPc === undefined) {
     return { chord: null, symbol: 'NC' };
   }
 
-  // If no root, return null chord with interval description
-  if (!event.rootName || event.rootPc === undefined) {
-    const symbol = quality ? `?${quality.displayName}` : `[${event.intervals.join(',')}]`;
-    return { chord: null, symbol };
-  }
-
-  // If we have root but no quality match, show "Root[intervals]" or "Root?" for degenerate cases
+  // Rooted but no quality match → show "Root[intervals]" for export/debugging.
   if (!quality) {
-    const symbol = event.intervals.length > 1
-      ? `${event.rootName}[${event.intervals.join(',')}]`
-      : `${event.rootName}?`;
-    return { chord: null, symbol };
+    return { chord: null, symbol: `${event.rootName}[${event.intervals.join(',')}]` };
   }
 
   // Full chord with root and quality
