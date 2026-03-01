@@ -11,6 +11,8 @@ import { TransportBar } from './TransportBar';
 import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
 import { VpIntensityControls } from './VpIntensityControls';
+import { GeneralIntensityControls } from './GeneralIntensityControls';
+import type { IntensityPreset } from '../lib/intensity-synthesis';
 import { ActionBar } from './ActionBar';
 import { VariantInfo } from './VariantInfo';
 import { downloadChordDebug } from '../lib/midi-export';
@@ -66,6 +68,8 @@ interface ClipDetailProps {
   onSynthesizeIntensity?: (targetIntensity: string) => void;
   /** Called to batch-synthesize multiple intensity variants at once. */
   onSynthesizeAllIntensities?: (targets: string[]) => void;
+  /** Called to synthesize an intensity variant for any clip (ratio-based). */
+  onSynthesizeGeneralIntensity?: (preset: IntensityPreset) => void;
 }
 
 export function ClipDetail({
@@ -109,6 +113,7 @@ export function ClipDetail({
   vpSiblings = [],
   onSynthesizeIntensity,
   onSynthesizeAllIntensities,
+  onSynthesizeGeneralIntensity,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -371,6 +376,13 @@ export function ClipDetail({
           siblings={vpSiblings}
           onSynthesize={onSynthesizeIntensity}
           onSynthesizeAll={onSynthesizeAllIntensities}
+        />
+      )}
+
+      {!clip.vpMeta && onSynthesizeGeneralIntensity && (
+        <GeneralIntensityControls
+          clip={clip}
+          onSynthesize={onSynthesizeGeneralIntensity}
         />
       )}
 

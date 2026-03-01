@@ -12,6 +12,34 @@ import { computeSyncopation } from './gesture';
 import { detectOverallChord, detectChordsPerBar, type ChordMatch } from './chord-detect';
 
 // ---------------------------------------------------------------------------
+// General intensity presets (work for any clip, not just VP)
+// ---------------------------------------------------------------------------
+
+/**
+ * A ratio-based intensity preset.
+ * `noteRatio` < 1 → fewer notes (reduce); > 1 → more notes (amplify).
+ * `velRatio`  is derived from the VP dataset: velocity changes gently
+ * while note count changes more dramatically.
+ */
+export interface IntensityPreset {
+  /** Short display label, e.g. "×½" */
+  label: string;
+  noteRatio: number;
+  velRatio: number;
+}
+
+// VP-derived slope: vel_ratio ≈ 1 − (1 − note_ratio) × VP_VEL_SLOPE
+const VP_VEL_SLOPE = 0.15;
+const velFor = (r: number) => 1 - (1 - r) * VP_VEL_SLOPE;
+
+export const INTENSITY_PRESETS: readonly IntensityPreset[] = [
+  { label: '×¼',  noteRatio: 0.25, velRatio: velFor(0.25) },
+  { label: '×½',  noteRatio: 0.50, velRatio: velFor(0.50) },
+  { label: '×¾',  noteRatio: 0.75, velRatio: velFor(0.75) },
+  { label: '×1½', noteRatio: 1.50, velRatio: velFor(1.50) },
+];
+
+// ---------------------------------------------------------------------------
 // Public stats helper (used by the comparison table in VpIntensityControls)
 // ---------------------------------------------------------------------------
 

@@ -7,7 +7,7 @@ import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcura
 import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord, getEffectiveBarChords } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
-import { synthesizeIntensityDown, synthesizeIntensityUp, fallbackTargets } from '../lib/intensity-synthesis';
+import { synthesizeIntensityDown, synthesizeIntensityUp, fallbackTargets, type IntensityPreset } from '../lib/intensity-synthesis';
 import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
@@ -257,6 +257,49 @@ export function MidiCurator() {
       await handleSynthesizeIntensity(target);
     }
   }, [handleSynthesizeIntensity]);
+
+  /** Intensity variant from a ratio preset — works for any clip, no vpMeta required. */
+  const handleSynthesizeGeneralIntensity = useCallback(async (preset: IntensityPreset) => {
+    if (!selectedClip || !db) return;
+
+    const { noteRatio, velRatio, label } = preset;
+    const targetNoteCount = Math.max(1, Math.round(selectedClip.gesture.onsets.length * noteRatio));
+    const targetVelMean   = Math.min(127, Math.round(selectedClip.gesture.avg_velocity * velRatio));
+
+    const synthesize = noteRatio > 1 ? synthesizeIntensityUp : synthesizeIntensityDown;
+    const { gesture: synthGesture, harmonic: synthHarmonic } = synthesize(
+      selectedClip.gesture,
+      selectedClip.harmonic,
+      targetNoteCount,
+      targetVelMean,
+    );
+
+    const dotIdx = selectedClip.filename.lastIndexOf('.');
+    const base   = dotIdx >= 0 ? selectedClip.filename.slice(0, dotIdx) : selectedClip.filename;
+    const ext    = dotIdx >= 0 ? selectedClip.filename.slice(dotIdx)    : '.mid';
+
+    const synthClip: Clip = {
+      id:             crypto.randomUUID(),
+      filename:       `${base} (intensity ${label})${ext}`,
+      imported_at:    Date.now(),
+      bpm:            selectedClip.bpm,
+      gesture:        synthGesture,
+      harmonic:       synthHarmonic,
+      rating:         null,
+      notes:          `Intensity ${label} variant of "${selectedClip.filename}". ` +
+                      `${targetNoteCount} notes (×${noteRatio}), vel ${targetVelMean} (×${velRatio.toFixed(2)}).`,
+      source:         selectedClip.id,
+      sourceFilename: selectedClip.filename,
+      leadsheet:      selectedClip.leadsheet,
+    };
+
+    await db.addClip(synthClip);
+    await db.addTag(synthClip.id, 'intensity-variant');
+    await db.addTag(synthClip.id, `intensity-synth:${label}`);
+
+    refreshClips();
+    setAnnouncement(`Intensity ${label}: ${synthGesture.onsets.length} notes, vel ${Math.round(synthGesture.avg_velocity)}`);
+  }, [selectedClip, db, refreshClips]);
 
   /**
    * Import a single MIDI ArrayBuffer into the database.
@@ -1297,6 +1340,7 @@ export function MidiCurator() {
             vpSiblings={vpSiblings}
             onSynthesizeIntensity={handleSynthesizeIntensity}
             onSynthesizeAllIntensities={handleSynthesizeAllIntensities}
+            onSynthesizeGeneralIntensity={handleSynthesizeGeneralIntensity}
           />
         ) : (
           <div className="mc-main">
