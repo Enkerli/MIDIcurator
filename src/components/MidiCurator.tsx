@@ -346,6 +346,10 @@ export function MidiCurator() {
     const base   = dotIdx >= 0 ? selectedClip.filename.slice(0, dotIdx) : selectedClip.filename;
     const ext    = dotIdx >= 0 ? selectedClip.filename.slice(dotIdx)    : '.mid';
 
+    // Build a fresh leadsheet for the target chord — the realized clip's
+    // pitches are now in the target chord's world, not the source's.
+    const realLeadsheet = parseLeadsheet(targetChord.symbol, realGesture.num_bars);
+
     const realClip: Clip = {
       id:             crypto.randomUUID(),
       filename:       `${base} (realized ${targetChord.symbol})${ext}`,
@@ -358,7 +362,7 @@ export function MidiCurator() {
                       `${sourceChord.symbol} → ${targetChord.symbol}.`,
       source:         selectedClip.id,
       sourceFilename: selectedClip.filename,
-      leadsheet:      selectedClip.leadsheet,
+      leadsheet:      realLeadsheet,
     };
 
     await db.addClip(realClip);
