@@ -642,6 +642,51 @@ body {
   font-size: 10px;
 }
 
+/* Chord Realization controls */
+.mc-realize-source {
+  font-size: 12px;
+  color: var(--mc-text-muted);
+  margin: 0 0 10px;
+}
+
+.mc-realize-source-chord {
+  color: var(--mc-text);
+  font-weight: 600;
+}
+
+.mc-realize-target-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mc-realize-target-row label {
+  font-size: 12px;
+  color: var(--mc-text-label);
+  white-space: nowrap;
+}
+
+.mc-realize-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: var(--mc-accent);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mc-realize-btn:hover:not(:disabled) {
+  background: var(--mc-accent-light);
+}
+
+.mc-realize-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Action bar */
 .mc-action-bar {
   display: flex;

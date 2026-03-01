@@ -12,6 +12,7 @@ import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
 import { VpIntensityControls } from './VpIntensityControls';
 import { GeneralIntensityControls } from './GeneralIntensityControls';
+import { ChordRealizeControls } from './ChordRealizeControls';
 import type { IntensityPreset } from '../lib/intensity-synthesis';
 import { ActionBar } from './ActionBar';
 import { VariantInfo } from './VariantInfo';
@@ -70,6 +71,8 @@ interface ClipDetailProps {
   onSynthesizeAllIntensities?: (targets: string[]) => void;
   /** Called to synthesize an intensity variant for any clip (ratio-based). */
   onSynthesizeGeneralIntensity?: (preset: IntensityPreset) => void;
+  /** Called when the user requests a chord realization (degree-mapped pitch transform). */
+  onRealizeForChord?: (sourceChord: DetectedChord, targetChord: DetectedChord) => void;
 }
 
 export function ClipDetail({
@@ -114,6 +117,7 @@ export function ClipDetail({
   onSynthesizeIntensity,
   onSynthesizeAllIntensities,
   onSynthesizeGeneralIntensity,
+  onRealizeForChord,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -383,6 +387,13 @@ export function ClipDetail({
         <GeneralIntensityControls
           clip={clip}
           onSynthesize={onSynthesizeGeneralIntensity}
+        />
+      )}
+
+      {onRealizeForChord && (
+        <ChordRealizeControls
+          clip={clip}
+          onRealize={onRealizeForChord}
         />
       )}
 

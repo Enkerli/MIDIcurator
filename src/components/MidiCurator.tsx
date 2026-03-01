@@ -8,6 +8,8 @@ import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEvents
 import { extractGesture, extractHarmonic, toDetectedChord, getEffectiveBarChords } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
 import { synthesizeIntensityDown, synthesizeIntensityUp, fallbackTargets, type IntensityPreset } from '../lib/intensity-synthesis';
+import { realizeForChordTransform } from '../lib/chord-substitute';
+import { findQualityByKey } from '../lib/chord-dictionary';
 import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
@@ -47,6 +49,27 @@ function computeSegmentationFromLeadsheet(
     pitchClasses: sr.pitchClasses,
   }));
   return { boundaries, segmentChords };
+}
+
+/**
+ * Read a File as ArrayBuffer.  Falls back to a single retry after 300 ms if
+ * the first attempt fails with NotReadableError — this recovers from brief
+ * OS-level locks that occasionally affect files that were just downloaded or
+ * created (e.g. re-importing a MIDI that was just exported from the app).
+ *
+ * iCloud-only stubs (not locally present) will fail both attempts and
+ * propagate the NotReadableError so the caller can show a useful message.
+ */
+async function readFileBuffer(file: File): Promise<ArrayBuffer> {
+  try {
+    return await file.arrayBuffer();
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'NotReadableError') {
+      await new Promise(r => setTimeout(r, 300));
+      return await file.arrayBuffer();
+    }
+    throw e;
+  }
 }
 
 export function MidiCurator() {
@@ -301,6 +324,51 @@ export function MidiCurator() {
     setAnnouncement(`Intensity ${label}: ${synthGesture.onsets.length} notes, vel ${Math.round(synthGesture.avg_velocity)}`);
   }, [selectedClip, db, refreshClips]);
 
+  const handleRealizeForChord = useCallback(async (
+    sourceChord: DetectedChord,
+    targetChord: DetectedChord,
+  ) => {
+    if (!selectedClip || !db) return;
+
+    // Look up root-relative intervals for the target chord
+    const targetQuality = findQualityByKey(targetChord.qualityKey);
+    if (!targetQuality) return;
+
+    const { gesture: realGesture, harmonic: realHarmonic } = realizeForChordTransform(
+      selectedClip.gesture,
+      selectedClip.harmonic,
+      sourceChord.root,       // resolved by ChordRealizeControls (leadsheet-preferred)
+      targetChord.root,
+      targetQuality.pcs,
+    );
+
+    const dotIdx = selectedClip.filename.lastIndexOf('.');
+    const base   = dotIdx >= 0 ? selectedClip.filename.slice(0, dotIdx) : selectedClip.filename;
+    const ext    = dotIdx >= 0 ? selectedClip.filename.slice(dotIdx)    : '.mid';
+
+    const realClip: Clip = {
+      id:             crypto.randomUUID(),
+      filename:       `${base} (realized ${targetChord.symbol})${ext}`,
+      imported_at:    Date.now(),
+      bpm:            selectedClip.bpm,
+      gesture:        realGesture,
+      harmonic:       realHarmonic,
+      rating:         null,
+      notes:          `Chord realization of "${selectedClip.filename}": ` +
+                      `${sourceChord.symbol} → ${targetChord.symbol}.`,
+      source:         selectedClip.id,
+      sourceFilename: selectedClip.filename,
+      leadsheet:      selectedClip.leadsheet,
+    };
+
+    await db.addClip(realClip);
+    await db.addTag(realClip.id, 'chord-realize');
+    await db.addTag(realClip.id, `realize:${targetChord.symbol}`);
+
+    refreshClips();
+    setAnnouncement(`Realized for ${targetChord.symbol}`);
+  }, [selectedClip, db, refreshClips]);
+
   /**
    * Import a single MIDI ArrayBuffer into the database.
    * Shared by direct .mid import and Apple Loops extraction.
@@ -460,7 +528,7 @@ export function MidiCurator() {
       try {
         // ── Apple Loops files (.aif, .aiff, .caf) ──────────────────
         if (isAppleLoopFile(file.name)) {
-          const arrayBuffer = await file.arrayBuffer();
+          const arrayBuffer = await readFileBuffer(file);
           const result = parseAppleLoop(arrayBuffer);
 
           if (!result.midi) {
@@ -514,11 +582,18 @@ export function MidiCurator() {
         // ── Standard MIDI files (.mid) ──────────────────────────────
         if (!file.name.match(/\.midi?$/i)) continue;
 
-        const arrayBuffer = await file.arrayBuffer();
+        const arrayBuffer = await readFileBuffer(file);
         await importMidiBuffer(arrayBuffer, file.name);
       } catch (error) {
         console.error('Error importing', file.name, error);
-        warnings.push(`${file.name}: error — ${error instanceof Error ? error.message : String(error)}`);
+        let msg: string;
+        if (error instanceof DOMException && error.name === 'NotReadableError') {
+          msg = `${file.name}: cannot read file — if stored in iCloud, download it locally first ` +
+                `(right-click → Download Now in Finder); otherwise the file may be locked or restricted`;
+        } else {
+          msg = `${file.name}: error — ${error instanceof Error ? error.message : String(error)}`;
+        }
+        warnings.push(msg);
       }
     }
 
@@ -1341,6 +1416,7 @@ export function MidiCurator() {
             onSynthesizeIntensity={handleSynthesizeIntensity}
             onSynthesizeAllIntensities={handleSynthesizeAllIntensities}
             onSynthesizeGeneralIntensity={handleSynthesizeGeneralIntensity}
+            onRealizeForChord={handleRealizeForChord}
           />
         ) : (
           <div className="mc-main">

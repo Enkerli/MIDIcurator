@@ -1,11 +1,22 @@
 /**
  * Chord Substitution — transforms note pitches to match a new chord.
  *
- * When substituting chords, we map each note to the closest chord tone
- * in the target chord, preserving the octave register as much as possible.
+ * Two strategies are provided:
+ *
+ * 1. `substituteSegmentPitches` / `mapToClosestChordTone` — nearest-chord-tone
+ *    snap.  Fast, works for manual in-bar substitutions.
+ *
+ * 2. `realizeForChord` / `realizeForChordTransform` — degree-preserving
+ *    realization.  Maps each note's root-relative interval to the nearest
+ *    available interval in the target chord, then places the result in the
+ *    octave closest to the original pitch.  Roots stay roots, fifths stay
+ *    fifths — the function of each note is preserved.
  */
 
-import type { DetectedChord } from '../types/clip';
+import type { Gesture, Harmonic, BarChordInfo, DetectedChord } from '../types/clip';
+import type { TransformResult } from '../types/transform';
+import { toDetectedChord } from './gesture';
+import { detectOverallChord, detectChordsPerBar } from './chord-detect';
 import { getAllQualities } from './chord-dictionary';
 
 /**
@@ -116,4 +127,115 @@ export function substituteAllPitches(
 ): number[] {
   const targetPcs = getChordPitchClasses(newChord);
   return pitches.map(pitch => mapToClosestChordTone(pitch, targetPcs));
+}
+
+// ---------------------------------------------------------------------------
+// Degree-preserving chord realization
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the interval in `intervals` (root-relative, 0–11) nearest to `degree`
+ * by circular (mod-12) distance.
+ */
+function nearestInterval(degree: number, intervals: number[]): number {
+  let best = intervals[0]!;
+  let bestDist = Infinity;
+  for (const iv of intervals) {
+    const d = Math.min(Math.abs(iv - degree), 12 - Math.abs(iv - degree));
+    if (d < bestDist) { bestDist = d; best = iv; }
+  }
+  return best;
+}
+
+/**
+ * Remap pitches from a source chord to a target chord using degree mapping.
+ *
+ * For each pitch:
+ *   1. Compute the note's interval relative to `sourceRootPc` (0–11).
+ *   2. Find the nearest interval in `targetIntervals` by circular distance.
+ *   3. Place the resulting pitch class in the octave closest to the original.
+ *
+ * This preserves note function: roots stay roots, fifths stay fifths.
+ * For chord-quality changes (e.g. C7 → Cm7), only the affected intervals
+ * (the 3rd here) change; everything else is identical.
+ *
+ * @param pitches          MIDI pitches to transform
+ * @param sourceRootPc     Root pitch class of the source chord (0–11)
+ * @param targetRootPc     Root pitch class of the target chord (0–11)
+ * @param targetIntervals  Root-relative intervals of the target chord, e.g. [0,4,7,10]
+ */
+export function realizeForChord(
+  pitches: number[],
+  sourceRootPc: number,
+  targetRootPc: number,
+  targetIntervals: number[],
+): number[] {
+  if (pitches.length === 0 || targetIntervals.length === 0) return pitches.slice();
+
+  return pitches.map(pitch => {
+    const degree = ((pitch - sourceRootPc) % 12 + 12) % 12;
+    const targetInterval = nearestInterval(degree, targetIntervals);
+    const targetPc = (targetRootPc + targetInterval) % 12;
+
+    // Place targetPc in the octave closest to the original pitch
+    const octave = Math.floor(pitch / 12);
+    const candidates = [
+      (octave - 1) * 12 + targetPc,
+      octave * 12 + targetPc,
+      (octave + 1) * 12 + targetPc,
+    ].filter(c => c >= 0 && c <= 127);
+
+    return candidates.reduce(
+      (best, c) => Math.abs(c - pitch) < Math.abs(best - pitch) ? c : best,
+      candidates[0] ?? pitch,
+    );
+  });
+}
+
+/**
+ * Realize a full clip's gesture over a target chord.
+ *
+ * Timing and velocity are preserved intact — only pitches are remapped.
+ * Chord detection is re-run on the new pitches to update `harmonic`.
+ *
+ * @param gesture          Source gesture
+ * @param harmonic         Source harmonic (provides pitches + per-bar segments)
+ * @param sourceRootPc     Root PC of the source chord
+ * @param targetRootPc     Root PC of the target chord
+ * @param targetIntervals  Root-relative intervals of the target chord
+ */
+export function realizeForChordTransform(
+  gesture: Gesture,
+  harmonic: Harmonic,
+  sourceRootPc: number,
+  targetRootPc: number,
+  targetIntervals: number[],
+): TransformResult {
+  const newPitches = realizeForChord(
+    harmonic.pitches, sourceRootPc, targetRootPc, targetIntervals,
+  );
+
+  const { onsets, durations, num_bars, ticks_per_bar: tpBar } = gesture;
+
+  const overallMatch = detectOverallChord(newPitches);
+  const detectedChord = toDetectedChord(overallMatch);
+
+  const barMatches = detectChordsPerBar(newPitches, onsets, tpBar, num_bars, durations);
+  const barChords: BarChordInfo[] = barMatches.map((bm, idx) => ({
+    bar:          bm.bar,
+    chord:        toDetectedChord(bm.chord),
+    pitchClasses: bm.pitchClasses,
+    segments:     harmonic.barChords?.[idx]?.segments,
+  }));
+
+  // Gesture timing + velocity stats are unchanged — only the harmonic changes.
+  return {
+    gesture,
+    harmonic: {
+      pitches:      newPitches,
+      pitchClasses: newPitches.map(p => p % 12),
+      detectedChord,
+      barChords,
+    },
+  };
 }
