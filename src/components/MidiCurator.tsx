@@ -7,7 +7,7 @@ import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcura
 import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord, getEffectiveBarChords } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
-import { synthesizeIntensityDown, fallbackTargets } from '../lib/intensity-synthesis';
+import { synthesizeIntensityDown, synthesizeIntensityUp, fallbackTargets } from '../lib/intensity-synthesis';
 import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
@@ -212,7 +212,9 @@ export function MidiCurator() {
           targetIntensity,
         );
 
-    const { gesture: synthGesture, harmonic: synthHarmonic } = synthesizeIntensityDown(
+    const goingUp = parseInt(targetIntensity) > parseInt(sourceIntensity);
+    const synthesize = goingUp ? synthesizeIntensityUp : synthesizeIntensityDown;
+    const { gesture: synthGesture, harmonic: synthHarmonic } = synthesize(
       selectedClip.gesture,
       selectedClip.harmonic,
       targetNoteCount,

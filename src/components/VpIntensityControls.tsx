@@ -9,7 +9,7 @@ interface VpIntensityControlsProps {
   onSynthesize: (targetIntensity: string) => void;
 }
 
-/** Intensities in ascending order. Synthesis only goes downward. */
+/** All known intensities in ascending order. */
 const ALL_INTENSITIES = ['1', '3', '5', '6', '8', '10'] as const;
 type KnownIntensity = typeof ALL_INTENSITIES[number];
 
@@ -33,6 +33,41 @@ const METRIC_LABELS: Record<string, string> = {
   pitchRange:   'Pitch range',
 };
 
+/** Renders a row of synthesis buttons for one direction. */
+function IntensityButtonRow({
+  label,
+  targets,
+  synthByIntensity,
+  onSynthesize,
+}: {
+  label: string;
+  targets: readonly KnownIntensity[];
+  synthByIntensity: Map<string, Clip>;
+  onSynthesize: (t: string) => void;
+}) {
+  if (targets.length === 0) return null;
+  return (
+    <div className="mc-intensity-direction">
+      <span className="mc-intensity-direction-label">{label}</span>
+      <div className="mc-density-presets">
+        {targets.map(target => {
+          const already = synthByIntensity.has(target);
+          return (
+            <button
+              key={target}
+              className={`mc-preset-btn${already ? ' mc-preset-btn--active' : ''}`}
+              title={already ? `Re-synthesize intensity ${target}` : `Synthesize intensity ${target}`}
+              onClick={() => onSynthesize(target)}
+            >
+              {target}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensityControlsProps) {
   // Always call hooks — conditional rendering happens after.
   const sourceStats = useMemo(
@@ -40,16 +75,18 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
     [clip],
   );
 
-  // Build a map: intensity string → sibling clip (original, if imported)
+  // Map: intensity string → original sibling (imported, non-synth)
   const siblingByIntensity = useMemo(() => {
     const map = new Map<string, Clip>();
     for (const s of siblings) {
-      if (s.vpMeta?.intensity) map.set(s.vpMeta.intensity, s);
+      if (s.vpMeta?.intensity && !s.vpMeta.intensity.endsWith('-synth')) {
+        map.set(s.vpMeta.intensity, s);
+      }
     }
     return map;
   }, [siblings]);
 
-  // Build a map: intensity string → synthesized sibling (tagged as X-synth)
+  // Map: intensity string → synthesized sibling (tagged as X-synth)
   const synthByIntensity = useMemo(() => {
     const map = new Map<string, Clip>();
     for (const s of siblings) {
@@ -61,14 +98,20 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
     return map;
   }, [siblings]);
 
-  // Only render for VP clips that have lower intensities available.
+  // Only render for VP clips that have other intensities to synthesize
   const sourceIntensity = clip.vpMeta?.intensity;
-  if (!sourceIntensity) return null;
+  if (!sourceIntensity || sourceIntensity.endsWith('-synth')) return null;
 
-  const targetIntensities = ALL_INTENSITIES.filter(
+  const lowerTargets = ALL_INTENSITIES.filter(
     (i): i is KnownIntensity => parseInt(i) < parseInt(sourceIntensity),
   );
-  if (targetIntensities.length === 0) return null;
+  const higherTargets = ALL_INTENSITIES.filter(
+    (i): i is KnownIntensity => parseInt(i) > parseInt(sourceIntensity),
+  );
+  if (lowerTargets.length === 0 && higherTargets.length === 0) return null;
+
+  // All synth variants across both directions, sorted by intensity number
+  const allSynthTargets = ALL_INTENSITIES.filter(i => synthByIntensity.has(i));
 
   return (
     <div className="mc-transform-section">
@@ -80,24 +123,21 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
           {' '}{sourceStats.onsetDensity.toFixed(2)} onset/bar
         </p>
 
-        <div className="mc-density-presets">
-          {targetIntensities.map(target => {
-            const already = synthByIntensity.has(target);
-            return (
-              <button
-                key={target}
-                className={`mc-preset-btn${already ? ' mc-preset-btn--active' : ''}`}
-                title={already ? `Re-synthesize intensity ${target}` : `Synthesize intensity ${target}`}
-                onClick={() => onSynthesize(target)}
-              >
-                →{target}
-              </button>
-            );
-          })}
-        </div>
+        <IntensityButtonRow
+          label="↑"
+          targets={higherTargets}
+          synthByIntensity={synthByIntensity}
+          onSynthesize={onSynthesize}
+        />
+        <IntensityButtonRow
+          label="↓"
+          targets={lowerTargets}
+          synthByIntensity={synthByIntensity}
+          onSynthesize={onSynthesize}
+        />
 
-        {/* Comparison table: one row per synthesized intensity */}
-        {targetIntensities.some(t => synthByIntensity.has(t)) && (
+        {/* Comparison table: one row per synthesized variant (either direction) */}
+        {allSynthTargets.length > 0 && (
           <table className="mc-intensity-compare">
             <thead>
               <tr>
@@ -108,9 +148,9 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
               </tr>
             </thead>
             <tbody>
-              {targetIntensities.filter(t => synthByIntensity.has(t)).map(target => {
-                const synth  = synthByIntensity.get(target)!;
-                const orig   = siblingByIntensity.get(target);
+              {allSynthTargets.map(target => {
+                const synth      = synthByIntensity.get(target)!;
+                const orig       = siblingByIntensity.get(target);
                 const synthStats = computeIntensityStats(synth.gesture, synth.harmonic);
                 const origStats  = orig ? computeIntensityStats(orig.gesture, orig.harmonic) : null;
 
@@ -118,11 +158,14 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
                   <tr key={target}>
                     <td>{target}</td>
                     {(Object.keys(METRIC_LABELS) as (keyof typeof METRIC_LABELS)[]).map(metric => {
-                      const sVal = synthStats[metric as keyof typeof synthStats] as number;
-                      const oVal = origStats?.[metric as keyof typeof origStats] as number | undefined;
+                      const sVal  = synthStats[metric as keyof typeof synthStats] as number;
+                      const oVal  = origStats?.[metric as keyof typeof origStats] as number | undefined;
                       const delta = oVal !== undefined ? sVal - oVal : null;
                       return (
-                        <td key={metric} className={delta !== null && Math.abs(delta) > 0 ? 'mc-intensity-delta' : ''}>
+                        <td
+                          key={metric}
+                          className={delta !== null && Math.abs(delta) > 0 ? 'mc-intensity-delta' : ''}
+                        >
                           {fmtStat(metric, sVal)}
                           {oVal !== undefined && (
                             <span

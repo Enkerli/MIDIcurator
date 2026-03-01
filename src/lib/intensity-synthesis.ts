@@ -1,9 +1,9 @@
 /**
  * VP Virtual Pianist — intensity synthesis.
  *
- * Simulates lower-intensity variants from a higher-intensity source clip by
- * selectively removing notes (prioritising weak metric positions, low velocity,
- * and pitch extremes) then rescaling velocities to match the target mean.
+ * Bidirectional: synthesize lower-intensity variants (note removal + velocity
+ * rescaling) or higher-intensity variants (note addition + velocity rescaling)
+ * from any source intensity level.
  */
 
 import type { Gesture, Harmonic, DetectedChord, BarChordInfo } from '../types/clip';
@@ -78,7 +78,7 @@ export function fallbackTargets(
 }
 
 // ---------------------------------------------------------------------------
-// Per-note scoring
+// Per-note scoring (shared by both synthesis directions)
 // ---------------------------------------------------------------------------
 
 /**
@@ -89,7 +89,6 @@ function noteMetricWeakness(onset: number, tpb: number, tpBar: number): number {
   const posInBeat = posInBar % tpb;
 
   if (posInBeat === 0) {
-    // Exactly on a beat boundary
     const beatNum = Math.floor(posInBar / tpb);
     return beatNum === 0 ? 0 : 0.25;        // downbeat=0, other beats=0.25
   }
@@ -107,7 +106,11 @@ function pitchExtremenessScore(pitch: number, pitchMin: number, pitchMax: number
 }
 
 /**
- * Combined removability score. Higher score → remove first.
+ * Combined removability score. Higher score → remove first (or add last when going up).
+ *
+ * Going down: sort descending, remove first.
+ * Going up:   sort ascending, add first — so the most "structural" candidates
+ *             (lowest removal score) are inserted before the weak fills.
  */
 function removalScore(
   onset: number,
@@ -128,7 +131,7 @@ function removalScore(
 }
 
 // ---------------------------------------------------------------------------
-// Main synthesis function
+// Shared tail: rebuild gesture + harmonic from final parallel arrays
 // ---------------------------------------------------------------------------
 
 function matchToDetectedChord(match: ChordMatch | null): DetectedChord | null {
@@ -146,6 +149,63 @@ function matchToDetectedChord(match: ChordMatch | null): DetectedChord | null {
   };
 }
 
+function rebuildFromArrays(
+  onsets: number[],
+  durations: number[],
+  velocities: number[],
+  newPitches: number[],
+  sourceGesture: Gesture,
+  sourceHarmonic: Harmonic,
+): TransformResult {
+  const { num_bars, ticks_per_bar: tpBar, ticks_per_beat: tpb } = sourceGesture;
+
+  const totalBeats   = num_bars * 4;
+  const density      = onsets.length / totalBeats;
+  const avgVelocity  = velocities.reduce((a, b) => a + b, 0) / velocities.length;
+  const velocityVariance =
+    velocities.reduce((sum, v) => sum + (v - avgVelocity) ** 2, 0) / velocities.length;
+  const avgDuration  = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+  const newGesture: Gesture = {
+    onsets,
+    durations,
+    velocities,
+    density,
+    syncopation_score: computeSyncopation(onsets, tpb, tpBar),
+    avg_velocity:      avgVelocity,
+    velocity_variance: velocityVariance,
+    avg_duration:      avgDuration,
+    num_bars,
+    ticks_per_bar:   tpBar,
+    ticks_per_beat:  tpb,
+  };
+
+  const overallMatch  = detectOverallChord(newPitches);
+  const detectedChord = matchToDetectedChord(overallMatch);
+
+  const barMatches = detectChordsPerBar(newPitches, onsets, tpBar, num_bars, durations);
+  const barChords: BarChordInfo[] = barMatches.map((bm, idx) => ({
+    bar:          bm.bar,
+    chord:        matchToDetectedChord(bm.chord),
+    pitchClasses: bm.pitchClasses,
+    segments:     sourceHarmonic.barChords?.[idx]?.segments,
+  }));
+
+  return {
+    gesture: newGesture,
+    harmonic: {
+      pitches:       newPitches,
+      pitchClasses:  newPitches.map(p => p % 12),
+      detectedChord,
+      barChords,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Downward synthesis: remove notes + rescale velocity
+// ---------------------------------------------------------------------------
+
 /**
  * Produce a lower-intensity version of `gesture`+`harmonic` by removing notes
  * and rescaling velocities.
@@ -159,11 +219,12 @@ export function synthesizeIntensityDown(
   targetNoteCount: number,
   targetVelMean: number,
 ): TransformResult {
-  const { ticks_per_beat: tpb, ticks_per_bar: tpBar, num_bars } = gesture;
+  const { ticks_per_beat: tpb, ticks_per_bar: tpBar } = gesture;
   const n = gesture.onsets.length;
+  const pitches = harmonic.pitches;
 
   // Build per-onset count map for polyphony excess detection
-  const ONSET_TOL = 30; // ticks — same as detectChordBlocks
+  const ONSET_TOL = 30;
   const onsetBucket = (onset: number) => Math.round(onset / ONSET_TOL) * ONSET_TOL;
   const onsetCount = new Map<number, number>();
   for (const o of gesture.onsets) {
@@ -171,8 +232,6 @@ export function synthesizeIntensityDown(
     onsetCount.set(b, (onsetCount.get(b) ?? 0) + 1);
   }
 
-  // Pitch stats
-  const pitches = harmonic.pitches;
   const pitchMin = pitches.length ? Math.min(...pitches) : 0;
   const pitchMax = pitches.length ? Math.max(...pitches) : 0;
 
@@ -190,14 +249,12 @@ export function synthesizeIntensityDown(
     });
   }
 
-  // Sort by score descending; remove highest-scored notes first
+  // Sort descending; keep the last keepCount (lowest scores = most structural)
   scored.sort((a, b) => b.score - a.score);
 
   const keepCount = Math.min(n, Math.max(1, targetNoteCount));
-  // Keep the last `keepCount` entries (lowest scores = most important)
-  const keepSet = new Set(scored.slice(scored.length - keepCount).map(x => x.i));
+  const keepSet   = new Set(scored.slice(scored.length - keepCount).map(x => x.i));
 
-  // Rebuild parallel arrays
   let onsets:     number[] = [];
   let durations:  number[] = [];
   let velocities: number[] = [];
@@ -221,48 +278,171 @@ export function synthesizeIntensityDown(
     }
   }
 
-  // Recompute gesture-level metrics
-  const totalBeats = num_bars * 4;
-  const density = onsets.length / totalBeats;
-  const avgVelocity = velocities.reduce((a, b) => a + b, 0) / velocities.length;
-  const velocityVariance =
-    velocities.reduce((sum, v) => sum + (v - avgVelocity) ** 2, 0) / velocities.length;
-  const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+  return rebuildFromArrays(onsets, durations, velocities, newPitches, gesture, harmonic);
+}
 
-  const newGesture: Gesture = {
-    onsets,
-    durations,
-    velocities,
-    density,
-    syncopation_score: computeSyncopation(onsets, tpb, tpBar),
-    avg_velocity:      avgVelocity,
-    velocity_variance: velocityVariance,
-    avg_duration:      avgDuration,
-    num_bars,
-    ticks_per_bar:   tpBar,
-    ticks_per_beat:  tpb,
+// ---------------------------------------------------------------------------
+// Upward synthesis: add notes + rescale velocity
+// ---------------------------------------------------------------------------
+
+/**
+ * Produce a higher-intensity version of `gesture`+`harmonic` by adding notes
+ * and rescaling velocities.
+ *
+ * Strategy: generate candidate notes at two levels —
+ *   1. Grid fills: 16th-note positions not already occupied (new rhythm positions).
+ *   2. Polyphony doublings: octave copies at existing onsets (thickens texture).
+ *   3. Interval doublings: 5th copies at existing onsets (fallback if still short).
+ *
+ * Candidates are scored with the same `removalScore` function as the downward
+ * path, but sorted ascending — we insert the "most structural" (lowest removal
+ * score) candidates first, leaving the weakest fills for the largest jumps.
+ *
+ * @param targetNoteCount  Desired number of notes in the output.
+ * @param targetVelMean    Desired mean velocity; 0 = no rescaling.
+ */
+export function synthesizeIntensityUp(
+  gesture: Gesture,
+  harmonic: Harmonic,
+  targetNoteCount: number,
+  targetVelMean: number,
+): TransformResult {
+  const { ticks_per_beat: tpb, ticks_per_bar: tpBar, num_bars } = gesture;
+  const n = gesture.onsets.length;
+  const pitches = harmonic.pitches;
+
+  const pitchMin = pitches.length ? Math.min(...pitches) : 60;
+  const pitchMax = pitches.length ? Math.max(...pitches) : 72;
+  const centre   = (pitchMin + pitchMax) / 2;
+
+  const meanVel = gesture.velocities.length
+    ? gesture.velocities.reduce((a, b) => a + b, 0) / gesture.velocities.length
+    : 80;
+  const meanDur = gesture.durations.length
+    ? gesture.durations.reduce((a, b) => a + b, 0) / gesture.durations.length
+    : tpb / 2;
+
+  const toAdd = Math.max(0, targetNoteCount - n);
+
+  // If already at or above target, velocity-only path
+  if (toAdd === 0) {
+    let velocities = [...gesture.velocities];
+    if (targetVelMean > 0 && velocities.length > 0) {
+      const currentMean = velocities.reduce((a, b) => a + b, 0) / velocities.length;
+      if (currentMean > 0) {
+        const scale = targetVelMean / currentMean;
+        velocities = velocities.map(v => Math.max(1, Math.min(127, Math.round(v * scale))));
+      }
+    }
+    return rebuildFromArrays(
+      [...gesture.onsets], [...gesture.durations], velocities, [...pitches],
+      gesture, harmonic,
+    );
+  }
+
+  // Build per-onset count map
+  const ONSET_TOL = 30;
+  const onsetBucket = (o: number) => Math.round(o / ONSET_TOL) * ONSET_TOL;
+  const onsetCount = new Map<number, number>();
+  for (const o of gesture.onsets) {
+    const b = onsetBucket(o);
+    onsetCount.set(b, (onsetCount.get(b) ?? 0) + 1);
+  }
+
+  type Candidate = {
+    onset: number; pitch: number; duration: number; velocity: number; score: number;
   };
+  const candidates: Candidate[] = [];
 
-  // Chord detection on the thinned set
-  const overallMatch  = detectOverallChord(newPitches);
-  const detectedChord = matchToDetectedChord(overallMatch);
+  // --- 1. Grid fill candidates: 16th-note positions not already occupied ---
+  const gridStep = Math.max(1, Math.round(tpb / 4));
+  for (let tick = 0; tick < num_bars * tpBar; tick += gridStep) {
+    if (onsetCount.has(onsetBucket(tick))) continue;
 
-  const barMatches = detectChordsPerBar(
-    newPitches, onsets, tpBar, num_bars, durations,
-  );
-  const barChords: BarChordInfo[] = barMatches.map((bm, idx) => ({
-    bar:         bm.bar,
-    chord:       matchToDetectedChord(bm.chord),
-    pitchClasses: bm.pitchClasses,
-    segments:    harmonic.barChords?.[idx]?.segments,
-  }));
+    // Pitch: nearest existing note by time
+    let nearestPitch = pitches[0] ?? 60;
+    let minDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(gesture.onsets[i]! - tick);
+      if (d < minDist) { minDist = d; nearestPitch = pitches[i]!; }
+    }
 
-  const newHarmonic: Harmonic = {
-    pitches:       newPitches,
-    pitchClasses:  newPitches.map(p => p % 12),
-    detectedChord,
-    barChords,
-  };
+    const vel = Math.max(1, Math.round(meanVel * 0.82));
+    const dur = Math.max(1, Math.round(meanDur * 0.8));
+    candidates.push({
+      onset: tick, pitch: nearestPitch, duration: dur, velocity: vel,
+      score: removalScore(tick, vel, nearestPitch, pitchMin, pitchMax, tpb, tpBar, false),
+    });
+  }
 
-  return { gesture: newGesture, harmonic: newHarmonic };
+  // --- 2. Polyphony doublings: octave copies at existing onsets ---
+  for (let i = 0; i < n; i++) {
+    const onset    = gesture.onsets[i]!;
+    const pitch    = pitches[i]!;
+    const velocity = gesture.velocities[i]!;
+    const duration = gesture.durations[i]!;
+    const bkt      = onsetBucket(onset);
+    const existing = onsetCount.get(bkt) ?? 1;
+    if (existing >= 4) continue;
+
+    // If above centre, add octave below; if below, add octave above
+    const double = pitch > centre ? pitch - 12 : pitch + 12;
+    if (double < 21 || double > 108) continue;
+
+    const vel = Math.max(1, Math.round(velocity * 0.88));
+    candidates.push({
+      onset, pitch: double, duration, velocity: vel,
+      score: removalScore(onset, vel, double, pitchMin, pitchMax, tpb, tpBar, existing >= 3),
+    });
+  }
+
+  // --- 3. Interval doublings: 5th copies, only if still short ---
+  if (candidates.length < toAdd) {
+    for (let i = 0; i < n; i++) {
+      const onset    = gesture.onsets[i]!;
+      const pitch    = pitches[i]!;
+      const velocity = gesture.velocities[i]!;
+      const duration = gesture.durations[i]!;
+      const bkt      = onsetBucket(onset);
+      const existing = onsetCount.get(bkt) ?? 1;
+      if (existing >= 5) continue;
+
+      const fifth = pitch + 12 > pitchMax ? pitch - 7 : pitch + 7;
+      if (fifth < 21 || fifth > 108) continue;
+
+      const vel = Math.max(1, Math.round(velocity * 0.85));
+      candidates.push({
+        onset, pitch: fifth, duration, velocity: vel,
+        score: removalScore(onset, vel, fifth, pitchMin, pitchMax, tpb, tpBar, existing >= 3),
+      });
+    }
+  }
+
+  // Sort ascending: add most "structural" (lowest removal score) candidates first
+  candidates.sort((a, b) => a.score - b.score);
+  const toInsert = candidates.slice(0, toAdd);
+
+  // Merge with existing notes, sort by onset then pitch
+  const merged = [
+    ...gesture.onsets.map((onset, i) => ({
+      onset, duration: gesture.durations[i]!, velocity: gesture.velocities[i]!, pitch: pitches[i]!,
+    })),
+    ...toInsert,
+  ].sort((a, b) => a.onset - b.onset || a.pitch - b.pitch);
+
+  let onsets     = merged.map(x => x.onset);
+  let durations  = merged.map(x => x.duration);
+  let velocities = merged.map(x => x.velocity);
+  let newPitches = merged.map(x => x.pitch);
+
+  // Velocity rescaling
+  if (targetVelMean > 0 && velocities.length > 0) {
+    const currentMean = velocities.reduce((a, b) => a + b, 0) / velocities.length;
+    if (currentMean > 0) {
+      const scale = targetVelMean / currentMean;
+      velocities = velocities.map(v => Math.max(1, Math.min(127, Math.round(v * scale))));
+    }
+  }
+
+  return rebuildFromArrays(onsets, durations, velocities, newPitches, gesture, harmonic);
 }

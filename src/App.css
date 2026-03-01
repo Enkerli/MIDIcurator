@@ -587,6 +587,61 @@ body {
   margin-top: 10px;
 }
 
+/* Intensity variant controls */
+
+.mc-intensity-direction {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mc-intensity-direction-label {
+  font-size: 13px;
+  color: var(--mc-text-dim);
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.mc-intensity-compare {
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+
+.mc-intensity-compare th,
+.mc-intensity-compare td {
+  padding: 3px 6px;
+  border: 1px solid var(--mc-border);
+  text-align: right;
+}
+
+.mc-intensity-compare th:first-child,
+.mc-intensity-compare td:first-child {
+  text-align: center;
+  font-weight: 600;
+  width: 56px;
+}
+
+.mc-intensity-compare th {
+  background: var(--mc-bg-raised);
+  color: var(--mc-text-muted);
+  font-weight: 500;
+}
+
+.mc-intensity-delta {
+  color: #8ab4d4;
+}
+:root[data-theme="light"] .mc-intensity-delta {
+  color: #1a5080;
+}
+
+.mc-intensity-orig {
+  color: var(--mc-text-dim);
+  font-size: 10px;
+}
+
 /* Action bar */
 .mc-action-bar {
   display: flex;

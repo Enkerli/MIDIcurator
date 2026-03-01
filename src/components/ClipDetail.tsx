@@ -62,7 +62,7 @@ interface ClipDetailProps {
   onLeadsheetBoundaryMove?: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
   /** Sibling VP clips at other intensity levels (same source + pattern). */
   vpSiblings?: Clip[];
-  /** Called when the user requests a synthesized lower-intensity variant. */
+  /** Called when the user requests a synthesized intensity variant (either direction). */
   onSynthesizeIntensity?: (targetIntensity: string) => void;
 }
 
