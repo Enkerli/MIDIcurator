@@ -200,6 +200,8 @@ export function MidiCurator() {
 
     const { vpMeta } = selectedClip;
     const sourceIntensity = vpMeta.intensity;
+    // Base intensity number (without '-synth' suffix) for numeric comparisons
+    const baseSourceIntensity = sourceIntensity.replace(/-synth$/, '');
 
     // Use sibling at target intensity as reference stats, or fall back to ratios
     const sibling = vpSiblings.find(s => s.vpMeta?.intensity === targetIntensity);
@@ -212,7 +214,7 @@ export function MidiCurator() {
           targetIntensity,
         );
 
-    const goingUp = parseInt(targetIntensity) > parseInt(sourceIntensity);
+    const goingUp = parseInt(targetIntensity) > parseInt(baseSourceIntensity);
     const synthesize = goingUp ? synthesizeIntensityUp : synthesizeIntensityDown;
     const { gesture: synthGesture, harmonic: synthHarmonic } = synthesize(
       selectedClip.gesture,
@@ -223,8 +225,9 @@ export function MidiCurator() {
 
     const synthClip: Clip = {
       id: crypto.randomUUID(),
+      // Match the base intensity number optionally followed by a "(synth from …)" annotation
       filename: selectedClip.filename.replace(
-        new RegExp(`- ${sourceIntensity} -`),
+        new RegExp(`- ${baseSourceIntensity}(?: \\(synth[^)]*\\))? -`),
         `- ${targetIntensity} (synth from ${sourceIntensity}) -`,
       ),
       imported_at: Date.now(),

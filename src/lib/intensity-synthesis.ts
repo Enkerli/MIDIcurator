@@ -69,8 +69,11 @@ export function fallbackTargets(
 ): { targetNoteCount: number; targetVelMean: number } {
   // All ratios are relative to the intensity-10 baseline, so we compute the
   // source→target ratio as target_ratio / source_ratio.
-  const srcR = FALLBACK_RATIOS[sourceIntensity] ?? { noteRatio: 1.0, velRatio: 1.0 };
-  const tgtR = FALLBACK_RATIOS[targetIntensity] ?? { noteRatio: 0.5, velRatio: 0.9 };
+  // Strip '-synth' suffix so synthesized clips resolve to the same bucket.
+  const srcKey = sourceIntensity.replace(/-synth$/, '');
+  const tgtKey = targetIntensity.replace(/-synth$/, '');
+  const srcR = FALLBACK_RATIOS[srcKey] ?? { noteRatio: 1.0, velRatio: 1.0 };
+  const tgtR = FALLBACK_RATIOS[tgtKey] ?? { noteRatio: 0.5, velRatio: 0.9 };
   return {
     targetNoteCount: Math.max(1, Math.round(sourceNoteCount * (tgtR.noteRatio / srcR.noteRatio))),
     targetVelMean:   Math.round(sourceVelMean   * (tgtR.velRatio  / srcR.velRatio)),
