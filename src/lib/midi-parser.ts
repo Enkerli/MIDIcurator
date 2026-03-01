@@ -271,6 +271,8 @@ export interface McuratorMetadata {
   clipNotes?: string;
   /** Loop metadata restored from an embedded MCURATOR:v1 loopmeta event. */
   loopMeta?: LoopMeta;
+  /** UJAM Virtual Pianist metadata extracted from the file-level event. */
+  vpMeta?: { source: string; pattern: string; intensity: string };
 }
 
 const MARKER_PREFIX = 'MCURATOR v1 SEG';
@@ -379,6 +381,7 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
   let variantOf: string | undefined;
   let clipNotes: string | undefined;
   let loopMeta: LoopMeta | undefined;
+  let vpMeta: { source: string; pattern: string; intensity: string } | undefined;
   for (const te of textEvents) {
     const json = parseTextJson(te.text);
     if (!json) continue;
@@ -386,6 +389,11 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
       fileInfo = json;
       if (typeof json.variantOf === 'string') variantOf = json.variantOf;
       if (typeof json.notes === 'string') clipNotes = json.notes;
+      if (typeof json.vpSource === 'string' &&
+          typeof json.vpPattern === 'string' &&
+          typeof json.vpIntensity === 'string') {
+        vpMeta = { source: json.vpSource, pattern: json.vpPattern, intensity: json.vpIntensity };
+      }
     } else if (json.type === 'leadsheet' && typeof json.text === 'string') {
       leadsheetText = json.text;
       // Restore per-chord beat timing if present (e.g. after boundary drag)
@@ -448,5 +456,5 @@ export function extractMcuratorSegments(midiData: ParsedMidi): McuratorMetadata 
   const segments = [...segmentMap.values()].sort((a, b) => a.tick - b.tick);
   const boundaries = segments.map(s => s.tick);
 
-  return { boundaries, segments, fileInfo, leadsheetText, leadsheetTiming, variantOf, clipNotes, loopMeta };
+  return { boundaries, segments, fileInfo, leadsheetText, leadsheetTiming, variantOf, clipNotes, loopMeta, vpMeta };
 }

@@ -299,6 +299,53 @@ export function StatsGrid({
         <div className="mc-stat-value">{clip.gesture.syncopation_score.toFixed(2)}</div>
       </div>
 
+      {clip.vpMeta && (
+        <div className="mc-loop-meta">
+          <div className="mc-loop-meta-section">
+            <span className="mc-loop-meta-label">Source</span>
+            <div className="mc-loop-meta-chips">
+              {onFilterByTag ? (
+                <button className="mc-loop-meta-chip mc-loop-meta-chip--provenance mc-loop-meta-chip--clickable"
+                        title={`Filter by source "${clip.vpMeta.source}"`}
+                        onClick={() => onFilterByTag(`${clip.vpMeta!.source.toLowerCase()}`)}>
+                  {clip.vpMeta.source}
+                </button>
+              ) : (
+                <span className="mc-loop-meta-chip mc-loop-meta-chip--provenance">{clip.vpMeta.source}</span>
+              )}
+            </div>
+          </div>
+          <div className="mc-loop-meta-section">
+            <span className="mc-loop-meta-label">Pattern</span>
+            <div className="mc-loop-meta-chips">
+              {onFilterByTag ? (
+                <button className="mc-loop-meta-chip mc-loop-meta-chip--genre mc-loop-meta-chip--clickable"
+                        title={`Filter by pattern "${clip.vpMeta.pattern}"`}
+                        onClick={() => onFilterByTag(`vp-pattern:${clip.vpMeta!.pattern}`)}>
+                  {clip.vpMeta.pattern}
+                </button>
+              ) : (
+                <span className="mc-loop-meta-chip mc-loop-meta-chip--genre">{clip.vpMeta.pattern}</span>
+              )}
+            </div>
+          </div>
+          <div className="mc-loop-meta-section">
+            <span className="mc-loop-meta-label">Intensity</span>
+            <div className="mc-loop-meta-chips">
+              {onFilterByTag ? (
+                <button className="mc-loop-meta-chip mc-loop-meta-chip--instrument mc-loop-meta-chip--clickable"
+                        title={`Filter by intensity "${clip.vpMeta.intensity}"`}
+                        onClick={() => onFilterByTag(`vp-intensity:${clip.vpMeta!.intensity}`)}>
+                  {clip.vpMeta.intensity}
+                </button>
+              ) : (
+                <span className="mc-loop-meta-chip mc-loop-meta-chip--instrument">{clip.vpMeta.intensity}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {clip.loopMeta && (
         <div className="mc-loop-meta">
           {/* Instrument row */}

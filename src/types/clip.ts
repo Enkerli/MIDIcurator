@@ -194,6 +194,16 @@ export interface LoopMeta {
   folderPath?: string;
 }
 
+/** Metadata from a UJAM Virtual Pianist pattern embedded in the MIDI file. */
+export interface VpMeta {
+  /** Product and tier, e.g. "VP-GRIT", "VP-VIBE-Basic", "VP-VIBE-Advanced" */
+  source: string;
+  /** Pattern name, e.g. "Barbara" */
+  pattern: string;
+  /** Intensity level: "1" | "3" | "5" | "6" | "8" | "10" | "10a" */
+  intensity: string;
+}
+
 /** A clip stored in IndexedDB. */
 export interface Clip {
   id: string;
@@ -213,6 +223,8 @@ export interface Clip {
   leadsheet?: Leadsheet;
   /** Metadata from the Logic/GarageBand loop browser DB, if available at import time. */
   loopMeta?: LoopMeta;
+  /** Metadata from a UJAM Virtual Pianist pattern, if embedded in the MIDI file. */
+  vpMeta?: VpMeta;
   /** User-set flag for triage / bulk processing (toggled with 'x'). */
   flagged?: boolean;
 }

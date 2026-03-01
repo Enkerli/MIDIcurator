@@ -304,6 +304,7 @@ export function MidiCurator() {
       segmentation,
       leadsheet,
       loopMeta: resolvedLoopMeta,
+      vpMeta: mcurator?.vpMeta,
     };
 
     await db.addClip(clip);
@@ -316,6 +317,13 @@ export function MidiCurator() {
       if (harmonic.detectedChord?.symbol) {
         await db.addTag(clip.id, harmonic.detectedChord.symbol);
       }
+    }
+
+    // Auto-tag VP clips with source, pattern, and intensity
+    if (clip.vpMeta) {
+      await db.addTag(clip.id, clip.vpMeta.source.toLowerCase());          // "vp-grit" / "vp-vibe-basic" / "vp-vibe-advanced"
+      await db.addTag(clip.id, `vp-pattern:${clip.vpMeta.pattern}`);       // "vp-pattern:Barbara"
+      await db.addTag(clip.id, `vp-intensity:${clip.vpMeta.intensity}`);   // "vp-intensity:10a"
     }
 
     // Apply extra tags (e.g. "apple-loop")
