@@ -140,10 +140,31 @@ export function getEffectiveBarChords(clip: Clip): BarChordInfo[] | undefined {
   if (!raw || !clip.leadsheet || clip.leadsheet.bars.length === 0) return raw;
 
   const leadsheetBarMap = new Map(clip.leadsheet.bars.map(lb => [lb.bar, lb]));
+
+  // Chord resonance: once a chord is established it carries forward until the
+  // next explicit chord or an explicit NC marker.
+  let prevLeadsheetChord: DetectedChord | null = null;
+
   return raw.map(bc => {
     const lb = leadsheetBarMap.get(bc.bar);
-    if (!lb || lb.isRepeat || lb.chords.length === 0) return bc;
-    // Use the first chord in the bar (bar opener); preserve pitchClasses.
-    return { ...bc, chord: lb.chords[0]!.chord };
+
+    // No leadsheet entry, or auto-filled repeat bar → carry previous chord forward.
+    if (!lb || lb.isRepeat || lb.chords.length === 0) {
+      return prevLeadsheetChord !== null
+        ? { ...bc, chord: prevLeadsheetChord }
+        : bc; // no chord seen yet — leave MIDI detection untouched
+    }
+
+    const firstChord = lb.chords[0]!;
+
+    // Explicit NC: honour it (null chord), reset resonance.
+    if (!firstChord.chord) {
+      prevLeadsheetChord = null;
+      return { ...bc, chord: null };
+    }
+
+    // Real chord: update resonance state and override.
+    prevLeadsheetChord = firstChord.chord;
+    return { ...bc, chord: firstChord.chord };
   });
 }

@@ -66,13 +66,18 @@ describe('parseLeadsheet', () => {
     expect(ls.bars[3]!.chords[0]!.chord?.rootName).toBe('F');
   });
 
-  it('pads missing bars with NC', () => {
+  it('auto-fills missing bars as repeats (chord resonance)', () => {
+    // Bars beyond the supplied tokens inherit the previous bar via isRepeat,
+    // so the chord carries forward rather than becoming NC.
     const ls = parseLeadsheet('Cm7 | Fm7', 4);
     expect(ls.bars).toHaveLength(4);
     expect(ls.bars[0]!.chords[0]!.chord?.rootName).toBe('C');
     expect(ls.bars[1]!.chords[0]!.chord?.rootName).toBe('F');
-    expect(ls.bars[2]!.chords[0]!.chord).toBeNull();
-    expect(ls.bars[3]!.chords[0]!.chord).toBeNull();
+    // Bars 2 and 3 are auto-filled repeats of bar 1 (Fm7)
+    expect(ls.bars[2]!.isRepeat).toBe(true);
+    expect(ls.bars[2]!.chords[0]!.chord?.rootName).toBe('F');
+    expect(ls.bars[3]!.isRepeat).toBe(true);
+    expect(ls.bars[3]!.chords[0]!.chord?.rootName).toBe('F');
   });
 
   it('preserves invalid chord inputText with null chord', () => {

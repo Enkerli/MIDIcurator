@@ -37,7 +37,18 @@ export function parseLeadsheet(input: string, numBars: number): Leadsheet {
   let prevBar: LeadsheetBar | null = null;
 
   for (let i = 0; i < Math.max(rawBars.length, numBars); i++) {
-    const raw = i < rawBars.length ? rawBars[i]!.trim() : '';
+    // Auto-fill: bars beyond what was supplied inherit the previous bar (chord resonance).
+    // This is distinct from an explicitly-written empty bar or "NC" token.
+    if (i >= rawBars.length) {
+      const repeated: LeadsheetBar = prevBar
+        ? { ...prevBar, bar: i, isRepeat: true }
+        : { bar: i, chords: [], isRepeat: true };
+      bars.push(repeated);
+      prevBar = repeated;
+      continue;
+    }
+
+    const raw = rawBars[i]!.trim();
 
     // Repeat token
     if (raw === '%' || raw === '-') {
