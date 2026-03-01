@@ -10,6 +10,7 @@ import { LeadsheetInput } from './LeadsheetInput';
 import { TransportBar } from './TransportBar';
 import { TagEditor } from './TagEditor';
 import { TransformControls } from './TransformControls';
+import { VpIntensityControls } from './VpIntensityControls';
 import { ActionBar } from './ActionBar';
 import { VariantInfo } from './VariantInfo';
 import { downloadChordDebug } from '../lib/midi-export';
@@ -59,6 +60,10 @@ interface ClipDetailProps {
   onFilterByTag?: (tag: string) => void;
   onLeadsheetChange?: (inputText: string) => void;
   onLeadsheetBoundaryMove?: (barIndex: number, boundaryIndex: number, newBeatPosition: number) => void;
+  /** Sibling VP clips at other intensity levels (same source + pattern). */
+  vpSiblings?: Clip[];
+  /** Called when the user requests a synthesized lower-intensity variant. */
+  onSynthesizeIntensity?: (targetIntensity: string) => void;
 }
 
 export function ClipDetail({
@@ -99,6 +104,8 @@ export function ClipDetail({
   onLeadsheetChange,
   onLeadsheetBoundaryMove,
   onSegmentFromLeadsheet,
+  vpSiblings = [],
+  onSynthesizeIntensity,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -354,6 +361,14 @@ export function ClipDetail({
         onAddTag={onAddTag}
         onTagClick={onFilterByTag}
       />
+
+      {clip.vpMeta && onSynthesizeIntensity && (
+        <VpIntensityControls
+          clip={clip}
+          siblings={vpSiblings}
+          onSynthesize={onSynthesizeIntensity}
+        />
+      )}
 
       <TransformControls
         densityMultiplier={densityMultiplier}

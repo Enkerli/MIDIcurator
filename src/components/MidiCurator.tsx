@@ -7,6 +7,7 @@ import { parseMIDI, extractNotes, extractBPM, extractTimeSignature, extractMcura
 import { isAppleLoopFile, parseAppleLoop, formatChordTimeline, enrichChordEventsWithMidiRoots, appleLoopEventsToLeadsheet } from '../lib/apple-loops-parser';
 import { extractGesture, extractHarmonic, toDetectedChord, getEffectiveBarChords } from '../lib/gesture';
 import { transformGesture } from '../lib/transform';
+import { synthesizeIntensityDown, fallbackTargets } from '../lib/intensity-synthesis';
 import { downloadMIDI, downloadAllAsZip, downloadVariantsAsZip } from '../lib/midi-export';
 import { getNotesInTickRange, detectChordBlocks, segmentFromLeadsheet } from '../lib/piano-roll';
 import type { TickRange } from '../lib/piano-roll';
@@ -181,6 +182,67 @@ export function MidiCurator() {
     refreshClips();
     setAnnouncement(`Generated 1 variant with density ${actualDensity}`);
   }, [selectedClip, db, densityMultiplier, refreshClips]);
+
+  /** All clips that share the same VP source + pattern as the selected clip. */
+  const vpSiblings = useMemo(() => {
+    if (!selectedClip?.vpMeta) return [];
+    const { source, pattern } = selectedClip.vpMeta;
+    return clips.filter(c =>
+      c.id !== selectedClip.id &&
+      c.vpMeta?.source === source &&
+      c.vpMeta?.pattern === pattern,
+    );
+  }, [selectedClip, clips]);
+
+  /** Synthesize a lower-intensity variant of the selected VP-intensity-10 clip. */
+  const handleSynthesizeIntensity = useCallback(async (targetIntensity: string) => {
+    if (!selectedClip?.vpMeta || !db) return;
+    if (selectedClip.vpMeta.intensity !== '10') return;
+
+    // Use sibling at target intensity as reference stats, or fall back to ratios
+    const sibling = vpSiblings.find(s => s.vpMeta?.intensity === targetIntensity);
+    const { targetNoteCount, targetVelMean } = sibling
+      ? { targetNoteCount: sibling.gesture.onsets.length, targetVelMean: sibling.gesture.avg_velocity }
+      : fallbackTargets(
+          selectedClip.gesture.onsets.length,
+          selectedClip.gesture.avg_velocity,
+          targetIntensity,
+        );
+
+    const { gesture: synthGesture, harmonic: synthHarmonic } = synthesizeIntensityDown(
+      selectedClip.gesture,
+      selectedClip.harmonic,
+      targetNoteCount,
+      targetVelMean,
+    );
+
+    const { vpMeta } = selectedClip;
+    const synthClip: Clip = {
+      id: crypto.randomUUID(),
+      filename: selectedClip.filename.replace(
+        /- 10 -/,
+        `- ${targetIntensity} (synth from 10) -`,
+      ),
+      imported_at: Date.now(),
+      bpm: selectedClip.bpm,
+      gesture: synthGesture,
+      harmonic: synthHarmonic,
+      rating: null,
+      notes: `Synthesized intensity ${targetIntensity} from intensity 10 (${selectedClip.filename}). Target: ${targetNoteCount} notes, vel ${targetVelMean.toFixed(1)}.${sibling ? '' : ' (no sibling in DB — used fallback ratios)'}`,
+      source: selectedClip.id,
+      sourceFilename: selectedClip.filename,
+      leadsheet: selectedClip.leadsheet,
+      vpMeta: { source: vpMeta.source, pattern: vpMeta.pattern, intensity: `${targetIntensity}-synth` },
+    };
+
+    await db.addClip(synthClip);
+    await db.addTag(synthClip.id, `${vpMeta.source.toLowerCase()}-synth`);
+    await db.addTag(synthClip.id, `vp-pattern:${vpMeta.pattern}`);
+    await db.addTag(synthClip.id, `vp-intensity:${targetIntensity}-synth`);
+
+    refreshClips();
+    setAnnouncement(`Synthesized intensity ${targetIntensity} (${synthGesture.onsets.length} notes)`);
+  }, [selectedClip, vpSiblings, db, refreshClips]);
 
   /**
    * Import a single MIDI ArrayBuffer into the database.
@@ -1218,6 +1280,8 @@ export function MidiCurator() {
             onLeadsheetChange={handleLeadsheetChange}
             onLeadsheetBoundaryMove={handleLeadsheetBoundaryMove}
             onSegmentFromLeadsheet={selectedClip?.leadsheet ? handleSegmentFromLeadsheet : undefined}
+            vpSiblings={vpSiblings}
+            onSynthesizeIntensity={handleSynthesizeIntensity}
           />
         ) : (
           <div className="mc-main">
