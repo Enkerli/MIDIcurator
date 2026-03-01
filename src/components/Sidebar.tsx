@@ -2,6 +2,7 @@ import { type RefObject, useState, useMemo } from 'react';
 import type { Clip } from '../types/clip';
 import type { VoicingShape } from '../lib/progressions';
 import { getEffectiveBarChords } from '../lib/gesture';
+import { parseChordSymbol } from '../lib/chord-parser';
 import { DropZone } from './DropZone';
 import { ClipCard } from './ClipCard';
 import { ThemeToggle } from './ThemeToggle';
@@ -31,6 +32,11 @@ interface SidebarProps {
   loopDbStatus?: 'idle' | 'loading' | 'ok' | 'error';
   /** Number of existing clips that were enriched with loop metadata. */
   loopDbEnriched?: number;
+  /**
+   * Apply a chord symbol as the leadsheet for all currently-filtered clips.
+   * Shown when provided and there are filtered clips in the list.
+   */
+  onBulkLeadsheetUpdate?: (symbol: string) => void;
 }
 
 export function Sidebar({
@@ -52,9 +58,15 @@ export function Sidebar({
   loopDbFileName,
   loopDbStatus = 'idle',
   loopDbEnriched = 0,
+  onBulkLeadsheetUpdate,
 }: SidebarProps) {
   const loopDbInputRef = { current: null as HTMLInputElement | null };
   const [unknownOpen, setUnknownOpen] = useState(false);
+  const [bulkChordInput, setBulkChordInput] = useState('');
+  const parsedBulkChord = useMemo(
+    () => (bulkChordInput.trim() ? parseChordSymbol(bulkChordInput.trim()) : null),
+    [bulkChordInput],
+  );
 
   /**
    * Collect unrecognized chord symbols from allClips.
@@ -249,6 +261,49 @@ export function Sidebar({
           >
             ⚑ Flagged
           </button>
+        </div>
+      )}
+
+      {/* Bulk leadsheet panel */}
+      {onBulkLeadsheetUpdate && clips.length > 0 && (
+        <div className="mc-bulk-leadsheet">
+          <div className="mc-bulk-leadsheet-row">
+            <label htmlFor="mc-bulk-chord" className="mc-bulk-leadsheet-label">Leadsheet</label>
+            <input
+              id="mc-bulk-chord"
+              type="text"
+              className={[
+                'mc-chord-input mc-bulk-chord-input',
+                bulkChordInput.trim()
+                  ? (parsedBulkChord ? 'mc-chord-input--valid' : 'mc-chord-input--invalid')
+                  : '',
+              ].filter(Boolean).join(' ')}
+              value={bulkChordInput}
+              placeholder="e.g. C, Fm7"
+              onChange={e => setBulkChordInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && parsedBulkChord) {
+                  onBulkLeadsheetUpdate(parsedBulkChord.symbol);
+                  setBulkChordInput('');
+                }
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button
+              className="mc-bulk-leadsheet-btn"
+              disabled={!parsedBulkChord}
+              title={`Set leadsheet to "${parsedBulkChord?.symbol ?? ''}" for all ${clips.length} visible clip${clips.length !== 1 ? 's' : ''}`}
+              onClick={() => {
+                if (parsedBulkChord) {
+                  onBulkLeadsheetUpdate(parsedBulkChord.symbol);
+                  setBulkChordInput('');
+                }
+              }}
+            >
+              Apply to {clips.length}
+            </button>
+          </div>
         </div>
       )}
 

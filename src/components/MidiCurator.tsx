@@ -72,6 +72,56 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
   }
 }
 
+/**
+ * Parse a UJAM-style export filename to extract product source, BPM, pattern
+ * name and intensity level.
+ *
+ * Expected format (produced by VP-GRIT, VG-Iron, VB-Dandy etc.):
+ *   "{PRODUCT} - {BPM} bpm - {PATTERN NAME} - {INTENSITY} - {TIMESTAMP}.mid"
+ *
+ * Returns null if the filename doesn't match this structure.
+ */
+function parseUjamFilename(filename: string): {
+  source: string;
+  bpm: number | null;
+  pattern: string;
+  intensity: string;
+} | null {
+  // Strip .mid extension then split on " - " delimiter
+  const name = filename.replace(/\.mid$/i, '');
+  const parts = name.split(' - ');
+  if (parts.length < 4) return null;
+
+  const source = parts[0]!.trim();
+  // Product must look like VP-GRIT, VG-Iron, VB-Dandy (2-letter prefix + hyphen + word)
+  if (!/^[A-Z]{2}-\w/i.test(source)) return null;
+
+  // Find the BPM field (e.g. "143 bpm")
+  const bpmIdx = parts.findIndex(p => /^\d+\s*bpm$/i.test(p.trim()));
+  if (bpmIdx < 1) return null; // must be after the product name
+
+  const bpmVal = parseInt(parts[bpmIdx]!.match(/(\d+)/)![1]!);
+
+  // Collect parts that come after the BPM field
+  const after = parts.slice(bpmIdx + 1);
+  if (after.length < 2) return null; // need at least pattern + intensity
+
+  // Optional trailing timestamp (≥ 8 consecutive digits)
+  let end = after.length;
+  if (/^\d{8,}$/.test(after[end - 1]!.trim())) end--;
+  if (end < 2) return null;
+
+  // Intensity is the last remaining field (digits + optional letter suffix: "10", "10a")
+  const candidateIntensity = after[end - 1]!.trim();
+  if (!/^\d+[a-z]?$/i.test(candidateIntensity)) return null;
+
+  const intensity = candidateIntensity;
+  const pattern = after.slice(0, end - 1).join(' - ').trim();
+  if (!pattern) return null;
+
+  return { source, bpm: isNaN(bpmVal) ? null : bpmVal, pattern, intensity };
+}
+
 export function MidiCurator() {
   const { db, clips, tagIndex, refreshClips } = useDatabase();
   const { playbackState, currentTime, play, pause, stop, toggle } = usePlayback();
@@ -397,10 +447,12 @@ export function MidiCurator() {
 
     if (notes.length === 0) return;
 
-    let bpm: number | null = null;
-    const bpmMatch = filename.match(/(\d+)[-_\s]?bpm/i);
-    if (bpmMatch) {
-      bpm = parseInt(bpmMatch[1]!);
+    // Try structured UJAM filename first; fall back to generic BPM regex
+    const ujamMeta = parseUjamFilename(filename);
+    let bpm: number | null = ujamMeta?.bpm ?? null;
+    if (!bpm) {
+      const bpmMatch = filename.match(/(\d+)[-_\s]?bpm/i);
+      if (bpmMatch) bpm = parseInt(bpmMatch[1]!);
     }
     if (!bpm) {
       bpm = extractBPM(midiData);
@@ -495,7 +547,10 @@ export function MidiCurator() {
       segmentation,
       leadsheet,
       loopMeta: resolvedLoopMeta,
-      vpMeta: mcurator?.vpMeta,
+      // Filename-derived UJAM metadata takes precedence over embedded MIDI metadata
+      vpMeta: ujamMeta
+        ? { source: ujamMeta.source, pattern: ujamMeta.pattern, intensity: ujamMeta.intensity }
+        : mcurator?.vpMeta,
     };
 
     await db.addClip(clip);
@@ -1129,6 +1184,25 @@ export function MidiCurator() {
     });
   }, [clips, filterTag, tagIndex]);
 
+  /**
+   * Apply a single chord symbol as the leadsheet for every clip in
+   * `filteredClips`.  Useful for bulk-correcting chord annotations when
+   * importing batches that share the same underlying chord (e.g. VP Score
+   * files that are all C major but were imported without a leadsheet).
+   */
+  const handleBulkLeadsheetUpdate = useCallback(async (symbol: string) => {
+    if (!db) return;
+    for (const clip of filteredClips) {
+      const newLeadsheet = parseLeadsheet(symbol, clip.gesture.num_bars);
+      const updated: Clip = { ...clip, leadsheet: newLeadsheet };
+      await db.updateClip(updated);
+      // Keep the selected clip in sync so the detail panel refreshes immediately
+      if (selectedClip?.id === clip.id) setSelectedClip(updated);
+    }
+    refreshClips();
+    setAnnouncement(`Leadsheet set to ${symbol} for ${filteredClips.length} clip${filteredClips.length !== 1 ? 's' : ''}`);
+  }, [db, filteredClips, selectedClip, refreshClips]);
+
   // Escape key clears range selection or exits scissors mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1375,6 +1449,7 @@ export function MidiCurator() {
           loopDbFileName={loopDbFileName}
           loopDbStatus={loopDbStatus}
           loopDbEnriched={loopDbEnriched}
+          onBulkLeadsheetUpdate={handleBulkLeadsheetUpdate}
         />
 
         {selectedClip ? (
