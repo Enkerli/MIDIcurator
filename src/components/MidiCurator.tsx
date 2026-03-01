@@ -197,7 +197,9 @@ export function MidiCurator() {
   /** Synthesize a lower-intensity variant of the selected VP-intensity-10 clip. */
   const handleSynthesizeIntensity = useCallback(async (targetIntensity: string) => {
     if (!selectedClip?.vpMeta || !db) return;
-    if (selectedClip.vpMeta.intensity !== '10') return;
+
+    const { vpMeta } = selectedClip;
+    const sourceIntensity = vpMeta.intensity;
 
     // Use sibling at target intensity as reference stats, or fall back to ratios
     const sibling = vpSiblings.find(s => s.vpMeta?.intensity === targetIntensity);
@@ -206,6 +208,7 @@ export function MidiCurator() {
       : fallbackTargets(
           selectedClip.gesture.onsets.length,
           selectedClip.gesture.avg_velocity,
+          sourceIntensity,
           targetIntensity,
         );
 
@@ -216,19 +219,18 @@ export function MidiCurator() {
       targetVelMean,
     );
 
-    const { vpMeta } = selectedClip;
     const synthClip: Clip = {
       id: crypto.randomUUID(),
       filename: selectedClip.filename.replace(
-        /- 10 -/,
-        `- ${targetIntensity} (synth from 10) -`,
+        new RegExp(`- ${sourceIntensity} -`),
+        `- ${targetIntensity} (synth from ${sourceIntensity}) -`,
       ),
       imported_at: Date.now(),
       bpm: selectedClip.bpm,
       gesture: synthGesture,
       harmonic: synthHarmonic,
       rating: null,
-      notes: `Synthesized intensity ${targetIntensity} from intensity 10 (${selectedClip.filename}). Target: ${targetNoteCount} notes, vel ${targetVelMean.toFixed(1)}.${sibling ? '' : ' (no sibling in DB — used fallback ratios)'}`,
+      notes: `Synthesized intensity ${targetIntensity} from intensity ${sourceIntensity} (${selectedClip.filename}). Target: ${targetNoteCount} notes, vel ${targetVelMean.toFixed(1)}.${sibling ? '' : ' (no sibling in DB — used fallback ratios)'}`,
       source: selectedClip.id,
       sourceFilename: selectedClip.filename,
       leadsheet: selectedClip.leadsheet,

@@ -64,12 +64,16 @@ const FALLBACK_RATIOS: Record<string, { noteRatio: number; velRatio: number }> =
 export function fallbackTargets(
   sourceNoteCount: number,
   sourceVelMean: number,
+  sourceIntensity: string,
   targetIntensity: string,
 ): { targetNoteCount: number; targetVelMean: number } {
-  const r = FALLBACK_RATIOS[targetIntensity] ?? { noteRatio: 0.5, velRatio: 0.9 };
+  // All ratios are relative to the intensity-10 baseline, so we compute the
+  // source→target ratio as target_ratio / source_ratio.
+  const srcR = FALLBACK_RATIOS[sourceIntensity] ?? { noteRatio: 1.0, velRatio: 1.0 };
+  const tgtR = FALLBACK_RATIOS[targetIntensity] ?? { noteRatio: 0.5, velRatio: 0.9 };
   return {
-    targetNoteCount: Math.max(1, Math.round(sourceNoteCount * r.noteRatio)),
-    targetVelMean: Math.round(sourceVelMean * r.velRatio),
+    targetNoteCount: Math.max(1, Math.round(sourceNoteCount * (tgtR.noteRatio / srcR.noteRatio))),
+    targetVelMean:   Math.round(sourceVelMean   * (tgtR.velRatio  / srcR.velRatio)),
   };
 }
 

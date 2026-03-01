@@ -9,7 +9,9 @@ interface VpIntensityControlsProps {
   onSynthesize: (targetIntensity: string) => void;
 }
 
-const TARGET_INTENSITIES = ['1', '3', '5', '6', '8'] as const;
+/** Intensities in ascending order. Synthesis only goes downward. */
+const ALL_INTENSITIES = ['1', '3', '5', '6', '8', '10'] as const;
+type KnownIntensity = typeof ALL_INTENSITIES[number];
 
 /** Human-readable label for a metric value. */
 function fmtStat(key: string, val: number): string {
@@ -32,9 +34,7 @@ const METRIC_LABELS: Record<string, string> = {
 };
 
 export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensityControlsProps) {
-  // Only render for intensity-10 clips
-  if (clip.vpMeta?.intensity !== '10') return null;
-
+  // Always call hooks — conditional rendering happens after.
   const sourceStats = useMemo(
     () => computeIntensityStats(clip.gesture, clip.harmonic),
     [clip],
@@ -61,17 +61,27 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
     return map;
   }, [siblings]);
 
+  // Only render for VP clips that have lower intensities available.
+  const sourceIntensity = clip.vpMeta?.intensity;
+  if (!sourceIntensity) return null;
+
+  const targetIntensities = ALL_INTENSITIES.filter(
+    (i): i is KnownIntensity => parseInt(i) < parseInt(sourceIntensity),
+  );
+  if (targetIntensities.length === 0) return null;
+
   return (
     <div className="mc-transform-section">
       <h3>Intensity Variants</h3>
       <div className="mc-transform-panel">
         <p className="mc-note-count-preview">
-          Source: intensity 10 — {sourceStats.noteCount} notes, vel {sourceStats.velMean.toFixed(1)},
+          Source: intensity {sourceIntensity} — {sourceStats.noteCount} notes,
+          {' '}vel {sourceStats.velMean.toFixed(1)},
           {' '}{sourceStats.onsetDensity.toFixed(2)} onset/bar
         </p>
 
         <div className="mc-density-presets">
-          {TARGET_INTENSITIES.map(target => {
+          {targetIntensities.map(target => {
             const already = synthByIntensity.has(target);
             return (
               <button
@@ -87,7 +97,7 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
         </div>
 
         {/* Comparison table: one row per synthesized intensity */}
-        {TARGET_INTENSITIES.some(t => synthByIntensity.has(t)) && (
+        {targetIntensities.some(t => synthByIntensity.has(t)) && (
           <table className="mc-intensity-compare">
             <thead>
               <tr>
@@ -98,7 +108,7 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
               </tr>
             </thead>
             <tbody>
-              {TARGET_INTENSITIES.filter(t => synthByIntensity.has(t)).map(target => {
+              {targetIntensities.filter(t => synthByIntensity.has(t)).map(target => {
                 const synth  = synthByIntensity.get(target)!;
                 const orig   = siblingByIntensity.get(target);
                 const synthStats = computeIntensityStats(synth.gesture, synth.harmonic);
