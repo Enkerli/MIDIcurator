@@ -7,6 +7,8 @@ interface VpIntensityControlsProps {
   /** All sibling clips: same vpMeta.source + pattern, any intensity. */
   siblings: Clip[];
   onSynthesize: (targetIntensity: string) => void;
+  /** Called to synthesize all pending variants at once. */
+  onSynthesizeAll?: (targets: string[]) => void;
 }
 
 /** All known intensities in ascending order. */
@@ -68,7 +70,7 @@ function IntensityButtonRow({
   );
 }
 
-export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensityControlsProps) {
+export function VpIntensityControls({ clip, siblings, onSynthesize, onSynthesizeAll }: VpIntensityControlsProps) {
   // Always call hooks — conditional rendering happens after.
   const sourceStats = useMemo(
     () => computeIntensityStats(clip.gesture, clip.harmonic),
@@ -135,6 +137,25 @@ export function VpIntensityControls({ clip, siblings, onSynthesize }: VpIntensit
           synthByIntensity={synthByIntensity}
           onSynthesize={onSynthesize}
         />
+
+        {/* Generate-all button: only pending (non-existing) variants */}
+        {onSynthesizeAll && (() => {
+          const pending = ALL_INTENSITIES.filter(
+            (i): i is KnownIntensity =>
+              i !== sourceIntensity && !synthByIntensity.has(i),
+          );
+          return pending.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              <button
+                className="mc-preset-btn"
+                onClick={() => onSynthesizeAll(pending)}
+                title={`Synthesize all ${pending.length} missing intensity variant(s)`}
+              >
+                Generate all ({pending.length})
+              </button>
+            </div>
+          ) : null;
+        })()}
 
         {/* Comparison table: one row per synthesized variant (either direction) */}
         {allSynthTargets.length > 0 && (

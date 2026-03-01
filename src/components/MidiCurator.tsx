@@ -248,6 +248,13 @@ export function MidiCurator() {
     setAnnouncement(`Synthesized intensity ${targetIntensity} (${synthGesture.onsets.length} notes)`);
   }, [selectedClip, vpSiblings, db, refreshClips]);
 
+  /** Synthesize every intensity in `targets` sequentially. */
+  const handleSynthesizeAllIntensities = useCallback(async (targets: string[]) => {
+    for (const target of targets) {
+      await handleSynthesizeIntensity(target);
+    }
+  }, [handleSynthesizeIntensity]);
+
   /**
    * Import a single MIDI ArrayBuffer into the database.
    * Shared by direct .mid import and Apple Loops extraction.
@@ -1286,6 +1293,7 @@ export function MidiCurator() {
             onSegmentFromLeadsheet={selectedClip?.leadsheet ? handleSegmentFromLeadsheet : undefined}
             vpSiblings={vpSiblings}
             onSynthesizeIntensity={handleSynthesizeIntensity}
+            onSynthesizeAllIntensities={handleSynthesizeAllIntensities}
           />
         ) : (
           <div className="mc-main">

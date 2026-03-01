@@ -64,6 +64,8 @@ interface ClipDetailProps {
   vpSiblings?: Clip[];
   /** Called when the user requests a synthesized intensity variant (either direction). */
   onSynthesizeIntensity?: (targetIntensity: string) => void;
+  /** Called to batch-synthesize multiple intensity variants at once. */
+  onSynthesizeAllIntensities?: (targets: string[]) => void;
 }
 
 export function ClipDetail({
@@ -106,6 +108,7 @@ export function ClipDetail({
   onSegmentFromLeadsheet,
   vpSiblings = [],
   onSynthesizeIntensity,
+  onSynthesizeAllIntensities,
 }: ClipDetailProps) {
   const sourceClip = clip.source ? clips.find(c => c.id === clip.source) : undefined;
   const variantCount = clips.filter(c => c.source === clip.id).length;
@@ -367,6 +370,7 @@ export function ClipDetail({
           clip={clip}
           siblings={vpSiblings}
           onSynthesize={onSynthesizeIntensity}
+          onSynthesizeAll={onSynthesizeAllIntensities}
         />
       )}
 
